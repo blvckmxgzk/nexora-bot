@@ -117,9 +117,6 @@ export const omiseRefundProvider:
       };
     },
 
-      },
-    },
-
     async findExistingRefund(
       input: CreateRefundInput,
     ): Promise<RefundCreationResult | null> {

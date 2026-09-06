@@ -1,7 +1,210 @@
-src/services/payment/paymentProvider.ts
-src/services/payment/paymentProviderRegistry.ts
-src/services/payment/providers/omiseProvider.ts
-src/services/payment/providers/omiseRefundProvider.ts
-src/services/payment/providers/promptpayProvider.ts
-src/services/payment/providers/trueMoneyProvider.ts
-src/services/payment/refundProvider.ts
+     1	import type {
+     2	  CreateRefundInput,
+     3	  RefundCreationResult,
+     4	  RefundProvider,
+     5	} from "../refundProvider.js";
+     6	
+     7	const OMISE_API_URL =
+     8	  "https://api.omise.co";
+     9	
+    10	function getSecretKey(): string {
+    11	  const key =
+    12	    process.env.OMISE_SECRET_KEY;
+    13	
+    14	  if (!key) {
+    15	    throw new Error(
+    16	      "Missing environment variable: OMISE_SECRET_KEY",
+    17	    );
+    18	  }
+    19	
+    20	  return key;
+    21	}
+    22	
+    23	export const omiseRefundProvider:
+    24	  RefundProvider = {
+    25	    async createRefund(
+    26	      input: CreateRefundInput,
+    27	    ): Promise<RefundCreationResult> {
+    28	      const auth =
+    29	        Buffer.from(
+    30	          `${getSecretKey()}:`,
+    31	        ).toString("base64");
+    32	
+    33	      const body =
+    34	        new URLSearchParams();
+    35	
+    36	      body.set(
+    37	        "amount",
+    38	        String(
+    39	          Math.round(
+    40	            input.amount * 100,
+    41	          ),
+    42	        ),
+    43	      );
+    44	
+    45	      body.set(
+    46	        "metadata[order_id]",
+    47	        input.orderId,
+    48	      );
+    49	
+    50	      body.set(
+    51	        "metadata[refund_id]",
+    52	        input.refundId,
+    53	      );
+    54	
+    55	      const response =
+    56	        await fetch(
+    57	          `${OMISE_API_URL}/charges/${encodeURIComponent(
+    58	            input.providerPaymentId,
+    59	          )}/refunds`,
+    60	          {
+    61	            method: "POST",
+    62	
+    63	            headers: {
+    64	              Authorization:
+    65	                `Basic ${auth}`,
+    66	
+    67	              "Content-Type":
+    68	                "application/x-www-form-urlencoded",
+    69	            },
+    70	
+    71	            body,
+    72	          },
+    73	        );
+    74	
+    75	      const data =
+    76	        (await response.json()) as {
+    77	          id?: string;
+    78	          status?: string;
+    79	          amount?: number;
+    80	          currency?: string;
+    81	          voided?: boolean;
+    82	          message?: string;
+    83	          code?: string;
+    84	        };
+    85	
+    86	      if (
+    87	        !response.ok ||
+    88	        !data.id
+    89	      ) {
+    90	        throw new Error(
+    91	          data.message ??
+    92	            `Omise refund failed (${response.status})`,
+    93	        );
+    94	      }
+    95	
+    96	      return {
+    97	        providerRefundId:
+    98	          data.id,
+    99	
+   100	        status:
+   101	          data.status ??
+   102	          "unknown",
+   103	
+   104	        amount:
+   105	          Number(
+   106	            data.amount ?? 0,
+   107	          ) / 100,
+   108	
+   109	        currency:
+   110	          data.currency ??
+   111	          "THB",
+   112	
+   113	        voided:
+   114	          Boolean(
+   115	            data.voided,
+   116	          ),
+   117	      };
+   118	    },
+   119	
+   120	      },
+   121	    },
+   122	
+   123	    async findExistingRefund(
+   124	      input: CreateRefundInput,
+   125	    ): Promise<RefundCreationResult | null> {
+   126	      const auth =
+   127	        Buffer.from(
+   128	          `${getSecretKey()}:`,
+   129	        ).toString("base64");
+   130	
+   131	      const response =
+   132	        await fetch(
+   133	          `${OMISE_API_URL}/charges/${encodeURIComponent(
+   134	            input.providerPaymentId,
+   135	          )}/refunds?order=reverse_chronological&limit=100`,
+   136	          {
+   137	            method: "GET",
+   138	            headers: {
+   139	              Authorization:
+   140	                `Basic ${auth}`,
+   141	            },
+   142	          },
+   143	        );
+   144	
+   145	      const data =
+   146	        (await response.json()) as {
+   147	          object?: string;
+   148	          data?: Array<{
+   149	            id?: string;
+   150	            status?: string;
+   151	            amount?: number;
+   152	            currency?: string;
+   153	            voided?: boolean;
+   154	            metadata?: Record<
+   155	              string,
+   156	              unknown
+   157	            >;
+   158	          }>;
+   159	          message?: string;
+   160	        };
+   161	
+   162	      if (!response.ok) {
+   163	        throw new Error(
+   164	          data.message ??
+   165	            `Omise refund lookup failed (${response.status})`,
+   166	        );
+   167	      }
+   168	
+   169	      const expectedAmount =
+   170	        Math.round(
+   171	          input.amount * 100,
+   172	        );
+   173	
+   174	      const existing =
+   175	        data.data?.find(
+   176	          (item) =>
+   177	            item.metadata?.refund_id ===
+   178	              input.refundId &&
+   179	            Number(item.amount) ===
+   180	              expectedAmount,
+   181	        );
+   182	
+   183	      if (!existing?.id) {
+   184	        return null;
+   185	      }
+   186	
+   187	      return {
+   188	        providerRefundId:
+   189	          existing.id,
+   190	
+   191	        status:
+   192	          existing.status ??
+   193	          "unknown",
+   194	
+   195	        amount:
+   196	          Number(
+   197	            existing.amount ?? 0,
+   198	          ) / 100,
+   199	
+   200	        currency:
+   201	          existing.currency ??
+   202	          "THB",
+   203	
+   204	        voided:
+   205	          Boolean(
+   206	            existing.voided,
+   207	          ),
+   208	      };
+   209	    },
+   210	  };
