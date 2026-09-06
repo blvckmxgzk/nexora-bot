@@ -12,7 +12,8 @@
     "lint": "tsc --noEmit",
     "deploy": "npm run build && node dist/deploy-commands.js",
     "seed:items": "npm run build && node dist/seed-items.js",
-    "test:marketplace": "npm run build && node scripts/marketplace-smoke-test.mjs"
+    "test:marketplace": "npm run build && node scripts/marketplace-smoke-test.mjs",
+    "auto-push": "node scripts/auto-push.mjs"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -33,6 +34,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
+    "chokidar": "^5.0.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
