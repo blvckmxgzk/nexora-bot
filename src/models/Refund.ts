@@ -55,6 +55,8 @@ const refundSchema =
         type: String,
         default: null,
         index: true,
+        unique: true,
+        sparse: true,
       },
 
       providerPaymentId: {

@@ -116,4 +116,95 @@ export const omiseRefundProvider:
           ),
       };
     },
+
+      },
+    },
+
+    async findExistingRefund(
+      input: CreateRefundInput,
+    ): Promise<RefundCreationResult | null> {
+      const auth =
+        Buffer.from(
+          `${getSecretKey()}:`,
+        ).toString("base64");
+
+      const response =
+        await fetch(
+          `${OMISE_API_URL}/charges/${encodeURIComponent(
+            input.providerPaymentId,
+          )}/refunds?order=reverse_chronological&limit=100`,
+          {
+            method: "GET",
+            headers: {
+              Authorization:
+                `Basic ${auth}`,
+            },
+          },
+        );
+
+      const data =
+        (await response.json()) as {
+          object?: string;
+          data?: Array<{
+            id?: string;
+            status?: string;
+            amount?: number;
+            currency?: string;
+            voided?: boolean;
+            metadata?: Record<
+              string,
+              unknown
+            >;
+          }>;
+          message?: string;
+        };
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ??
+            `Omise refund lookup failed (${response.status})`,
+        );
+      }
+
+      const expectedAmount =
+        Math.round(
+          input.amount * 100,
+        );
+
+      const existing =
+        data.data?.find(
+          (item) =>
+            item.metadata?.refund_id ===
+              input.refundId &&
+            Number(item.amount) ===
+              expectedAmount,
+        );
+
+      if (!existing?.id) {
+        return null;
+      }
+
+      return {
+        providerRefundId:
+          existing.id,
+
+        status:
+          existing.status ??
+          "unknown",
+
+        amount:
+          Number(
+            existing.amount ?? 0,
+          ) / 100,
+
+        currency:
+          existing.currency ??
+          "THB",
+
+        voided:
+          Boolean(
+            existing.voided,
+          ),
+      };
+    },
   };

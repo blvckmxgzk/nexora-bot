@@ -276,56 +276,6 @@ export const refundService = {
       );
     }
 
-    /*
-     * ก่อนสร้าง refund ใหม่:
-     * ตรวจสอบกับ Omise ก่อนว่ารายการนี้ถูกสร้างไปแล้วหรือไม่
-     *
-     * ป้องกันกรณี:
-     * - Omise สร้าง refund สำเร็จ
-     * - network response หาย
-     * - NEXORA บันทึกเป็น failed
-     * - worker retry แล้วสร้าง refund ซ้ำ
-     */
-    const existingProviderRefund =
-      await omiseRefundProvider.findExistingRefund({
-        providerPaymentId:
-          refund.providerPaymentId,
-
-        amount:
-          refund.amount,
-
-        orderId:
-          refund.orderId,
-
-        refundId:
-          refund.refundId,
-      });
-
-    if (existingProviderRefund) {
-      refund.providerRefundId =
-        existingProviderRefund.providerRefundId;
-
-      refund.status =
-        "completed";
-
-      refund.completedAt =
-        new Date();
-
-      refund.failedAt =
-        null;
-
-      refund.error =
-        null;
-
-      await refund.save();
-
-      console.log(
-        `🔄 Existing Omise refund reconciled: ${refund.refundId} → ${existingProviderRefund.providerRefundId}`,
-      );
-
-      return refund;
-    }
-
     // Claim refund atomically.
     // ทั้ง approved และ failed สามารถ retry ได้
     const processingRefund =
@@ -547,5 +497,7 @@ export const refundService = {
 
       throw error;
     }
+  },
+
   },
 };

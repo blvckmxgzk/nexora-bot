@@ -17,4 +17,8 @@ export interface RefundProvider {
   createRefund(
     input: CreateRefundInput,
   ): Promise<RefundCreationResult>;
+
+  findExistingRefund(
+    input: CreateRefundInput,
+  ): Promise<RefundCreationResult | null>;
 }
