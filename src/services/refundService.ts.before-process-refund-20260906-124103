@@ -247,157 +247,56 @@ export const refundService = {
       );
     }
 
-    // Completed = idempotent success
-    if (
-      refund.status ===
-      "completed"
-    ) {
-      return refund;
-    }
-
-    // ป้องกัน concurrent process
-    if (
-      refund.status ===
-      "processing"
-    ) {
-      throw new Error(
-        "Refund นี้กำลังถูกประมวลผลอยู่",
-      );
-    }
-
     if (
       refund.status !==
-        "approved" &&
-      refund.status !==
-        "failed"
+      "approved"
     ) {
       throw new Error(
-        "Refund นี้ยังไม่พร้อมสำหรับการประมวลผล",
+        "Refund นี้ยังไม่ได้รับการอนุมัติ",
       );
     }
 
-    // Claim refund atomically.
-    // ทั้ง approved และ failed สามารถ retry ได้
-    const processingRefund =
-      await Refund.findOneAndUpdate(
-        {
-          refundId,
-          status: {
-            $in: [
-              "approved",
-              "failed",
-            ],
-          },
-        },
-        {
-          $set: {
-            status:
-              "processing",
-            error: null,
-          },
-          $unset: {
-            failedAt: 1,
-          },
-        },
-        {
-          new: true,
-        },
-      );
+    refund.status =
+      "processing";
 
-    if (!processingRefund) {
-      const current =
-        await Refund.findOne({
-          refundId,
-        });
-
-      if (
-        current?.status ===
-        "completed"
-      ) {
-        return current;
-      }
-
-      if (
-        current?.status ===
-        "processing"
-      ) {
-        throw new Error(
-          "Refund นี้กำลังถูกประมวลผลอยู่",
-        );
-      }
-
-      throw new Error(
-        "ไม่สามารถ claim Refund เพื่อประมวลผลได้",
-      );
-    }
+    await refund.save();
 
     try {
-      /*
-       * IMPORTANT:
-       * Omise request อยู่นอก MongoDB transaction
-       * เพราะเป็น external network operation
-       */
       const result =
         await omiseRefundProvider
           .createRefund({
             providerPaymentId:
-              processingRefund.providerPaymentId,
+              refund.providerPaymentId,
 
             amount:
-              processingRefund.amount,
+              refund.amount,
 
             orderId:
-              processingRefund.orderId,
+              refund.orderId,
 
             refundId:
-              processingRefund.refundId,
+              refund.refundId,
           });
 
-      /*
-       * Provider สำเร็จแล้ว
-       * บันทึก providerRefundId ก่อน
-       */
-      const completedRefund =
-        await Refund.findOneAndUpdate(
-          {
-            refundId,
-            status:
-              "processing",
-          },
-          {
-            $set: {
-              providerRefundId:
-                result.providerRefundId,
+      refund.providerRefundId =
+        result.providerRefundId;
 
-              status:
-                "completed",
+      refund.status =
+        "completed";
 
-              completedAt:
-                new Date(),
+      refund.completedAt =
+        new Date();
 
-              error: null,
-            },
-          },
-          {
-            new: true,
-          },
-        );
+      refund.error =
+        null;
 
-      if (!completedRefund) {
-        throw new Error(
-          "Omise refund สำเร็จ แต่ไม่สามารถบันทึก Refund ได้",
-        );
-      }
+      await refund.save();
 
-      /*
-       * หลัง provider สำเร็จ:
-       * Order + Payment ต้องถูกเปลี่ยนสถานะ
-       */
       const order =
         await Order.findOneAndUpdate(
           {
             orderId:
-              completedRefund.orderId,
+              refund.orderId,
 
             status: {
               $in: [
@@ -419,38 +318,16 @@ export const refundService = {
           },
         );
 
-      /*
-       * Order อาจถูกเปลี่ยนเป็น refunded ไปแล้ว
-       * ในกรณี retry หลัง partial failure
-       */
       if (!order) {
-        const currentOrder =
-          await Order.findOne({
-            orderId:
-              completedRefund.orderId,
-          });
-
-        if (
-          currentOrder?.status !==
-          "refunded"
-        ) {
-          throw new Error(
-            "คืนเงินสำเร็จ แต่ไม่สามารถเปลี่ยน Order เป็น refunded ได้",
-          );
-        }
+        throw new Error(
+          "คืนเงินสำเร็จ แต่ไม่สามารถเปลี่ยนสถานะ Order เป็น refunded ได้",
+        );
       }
 
       await Payment.findOneAndUpdate(
         {
           paymentId:
-            completedRefund.paymentId,
-
-          status: {
-            $in: [
-              "paid",
-              "refunded",
-            ],
-          },
+            refund.paymentId,
         },
         {
           $set: {
@@ -461,43 +338,25 @@ export const refundService = {
       );
 
       console.log(
-        `💰 Refund completed: ${completedRefund.refundId} → Order ${completedRefund.orderId}`,
+        `💰 Refund completed: ${refund.refundId} → Order ${refund.orderId}`,
       );
 
-      return completedRefund;
+      return refund;
     } catch (error) {
-      /*
-       * ถ้า provider request สำเร็จแต่ DB ขั้นหลังพัง
-       * ห้ามยิง Omise ซ้ำแบบ blind ในรอบถัดไป
-       *
-       * เราเก็บ failed ไว้เพื่อให้ระบบตรวจสอบ/reconcile
-       * ก่อน retry จริง
-       */
-      const message =
+      refund.status =
+        "failed";
+
+      refund.failedAt =
+        new Date();
+
+      refund.error =
         error instanceof Error
           ? error.message
           : "Refund failed";
 
-      await Refund.updateOne(
-        {
-          refundId,
-          status:
-            "processing",
-        },
-        {
-          $set: {
-            status:
-              "failed",
-            failedAt:
-              new Date(),
-            error: message,
-          },
-        },
-      );
+      await refund.save();
 
       throw error;
     }
-  },
-
   },
 };
