@@ -488,7 +488,7 @@ export const orderService = {
   async cancelOrder(
     orderId: string,
     reason?: string,
-  ) {
+  ): Promise<OrderDocument> {
     const order = await Order.findOne({
       orderId,
     });
