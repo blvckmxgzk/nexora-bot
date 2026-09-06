@@ -264,83 +264,232 @@ export const paymentService = {
   async cancelPayment(
     paymentId: string,
   ) {
-    const payment =
-      await Payment.findOneAndUpdate(
-        {
-          paymentId,
-          status: "pending",
-        },
-        {
-          $set: {
-            status: "cancelled",
-          },
-        },
-        {
-          returnDocument:
-            "after",
+    const session =
+      await mongoose.startSession();
+
+    let cancelledPayment: any = null;
+
+    try {
+      await session.withTransaction(
+        async () => {
+          const payment =
+            await Payment.findOne({
+              paymentId,
+            }).session(session);
+
+          if (!payment) {
+            throw new Error(
+              "ไม่พบ Payment",
+            );
+          }
+
+          // Idempotent: ถ้ายกเลิกไปแล้ว ไม่คืน stock ซ้ำ
+          if (
+            payment.status ===
+            "cancelled"
+          ) {
+            cancelledPayment =
+              payment;
+            return;
+          }
+
+          if (
+            payment.status !==
+            "pending"
+          ) {
+            throw new Error(
+              `ไม่สามารถยกเลิก Payment สถานะ ${payment.status} ได้`,
+            );
+          }
+
+          const now =
+            new Date();
+
+          const updatedPayment =
+            await Payment.findOneAndUpdate(
+              {
+                paymentId,
+                status: "pending",
+              },
+              {
+                $set: {
+                  status:
+                    "cancelled",
+                  cancelledAt:
+                    now,
+                },
+              },
+              {
+                new: true,
+                session,
+              },
+            );
+
+          if (!updatedPayment) {
+            const current =
+              await Payment.findOne({
+                paymentId,
+              }).session(session);
+
+            if (
+              current?.status ===
+              "cancelled"
+            ) {
+              cancelledPayment =
+                current;
+              return;
+            }
+
+            throw new Error(
+              "Payment ถูกเปลี่ยนสถานะก่อนยกเลิก",
+            );
+          }
+
+          const order =
+            await Order.findOne({
+              orderId:
+                updatedPayment.orderId,
+            }).session(session);
+
+          if (!order) {
+            throw new Error(
+              "ไม่พบ Order ที่ผูกกับ Payment",
+            );
+          }
+
+          // ถ้า Order ถูกยกเลิกและ release stock ไปแล้ว
+          // ไม่ต้องคืน stock ซ้ำ
+          if (
+            order.status ===
+              "cancelled" &&
+            order.metadata
+              ?.stockReleased ===
+              true
+          ) {
+            cancelledPayment =
+              updatedPayment;
+            return;
+          }
+
+          if (
+            order.status !==
+              "awaiting_payment" ||
+            order.paymentId !==
+              updatedPayment.paymentId
+          ) {
+            throw new Error(
+              `Order ${order.orderId} ไม่อยู่ในสถานะ awaiting_payment`,
+            );
+          }
+
+          const updatedOrder =
+            await Order.findOneAndUpdate(
+              {
+                orderId:
+                  order.orderId,
+                status:
+                  "awaiting_payment",
+                paymentId:
+                  updatedPayment.paymentId,
+                "metadata.stockReserved":
+                  true,
+                "metadata.stockReleased":
+                  {
+                    $ne: true,
+                  },
+              },
+              {
+                $set: {
+                  status:
+                    "cancelled",
+                  cancelledAt:
+                    now,
+                  cancelReason:
+                    "ยกเลิกการชำระเงิน",
+                  "metadata.stockReserved":
+                    false,
+                  "metadata.stockReleased":
+                    true,
+                },
+              },
+              {
+                new: true,
+                session,
+              },
+            );
+
+          if (!updatedOrder) {
+            const currentOrder =
+              await Order.findOne({
+                orderId:
+                  order.orderId,
+              }).session(session);
+
+            if (
+              currentOrder?.metadata
+                ?.stockReleased ===
+              true
+            ) {
+              cancelledPayment =
+                updatedPayment;
+              return;
+            }
+
+            throw new Error(
+              "ไม่สามารถยกเลิก Order ได้",
+            );
+          }
+
+          const stockResult =
+            await Product.updateOne(
+              {
+                productId:
+                  updatedOrder.productId,
+              },
+              {
+                $inc: {
+                  stock:
+                    updatedOrder.quantity,
+                },
+              },
+              {
+                session,
+              },
+            );
+
+          if (
+            stockResult.matchedCount !==
+            1
+          ) {
+            throw new Error(
+              `ไม่พบ Product สำหรับคืน Stock: ${updatedOrder.productId}`,
+            );
+          }
+
+          if (
+            stockResult.modifiedCount !==
+            1
+          ) {
+            throw new Error(
+              `ไม่สามารถคืน Stock ของ Product: ${updatedOrder.productId}`,
+            );
+          }
+
+          cancelledPayment =
+            updatedPayment;
         },
       );
 
-    if (!payment) {
-      const existing =
-        await Payment.findOne({
-          paymentId,
-        });
-
-      if (!existing) {
+      if (!cancelledPayment) {
         throw new Error(
-          "ไม่พบ Payment",
+          "Stock release ไม่ได้ผลลัพธ์",
         );
       }
 
-      return existing;
+      return cancelledPayment;
+    } finally {
+      await session.endSession();
     }
-
-    const order =
-      await Order.findOneAndUpdate(
-        {
-          orderId:
-            payment.orderId,
-          status:
-            "awaiting_payment",
-          paymentId:
-            payment.paymentId,
-        },
-        {
-          $set: {
-            status: "cancelled",
-            cancelledAt:
-              new Date(),
-            cancelReason:
-              "ยกเลิกการชำระเงิน",
-            "metadata.stockReserved":
-              false,
-            "metadata.stockReleased":
-              true,
-          },
-        },
-        {
-          returnDocument:
-            "after",
-        },
-      );
-
-    if (order) {
-      await Product.updateOne(
-        {
-          productId:
-            order.productId,
-        },
-        {
-          $inc: {
-            stock:
-              order.quantity,
-          },
-        },
-      );
-    }
-
-    return payment;
   },
 
   async markPaid(

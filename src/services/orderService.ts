@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { Order } from "../models/Order.js";
 import { Product } from "../models/Product.js";
 import { Shop } from "../models/Shop.js";
@@ -626,46 +627,154 @@ export const orderService = {
   async expireOrder(
     orderId: string,
   ) {
-    const order =
-      await Order.findOneAndUpdate(
-        {
-          orderId,
-          status:
-            "awaiting_payment",
-          "metadata.stockReserved":
-            true,
-        },
-        {
-          $set: {
-            status: "cancelled",
-            cancelledAt:
-              new Date(),
-            cancelReason:
-              "หมดเวลาชำระเงิน",
-            "metadata.stockReserved":
-              false,
-            "metadata.stockReleased":
-              true,
-          },
-        },
-        {
-          returnDocument:
-            "after",
+    const session =
+      await mongoose.startSession();
+
+    let expiredOrder: any = null;
+
+    try {
+      await session.withTransaction(
+        async () => {
+          const current =
+            await Order.findOne({
+              orderId,
+            }).session(session);
+
+          if (!current) {
+            throw new Error(
+              "ไม่พบคำสั่งซื้อ",
+            );
+          }
+
+          // Idempotent: หมดอายุและคืน stock ไปแล้ว
+          if (
+            current.status ===
+              "cancelled" &&
+            current.metadata
+              ?.stockReleased ===
+              true
+          ) {
+            expiredOrder =
+              current;
+            return;
+          }
+
+          if (
+            current.status !==
+            "awaiting_payment"
+          ) {
+            throw new Error(
+              `ไม่สามารถ expire Order สถานะ ${current.status} ได้`,
+            );
+          }
+
+          const now =
+            new Date();
+
+          const updated =
+            await Order.findOneAndUpdate(
+              {
+                orderId,
+                status:
+                  "awaiting_payment",
+                "metadata.stockReserved":
+                  true,
+                "metadata.stockReleased":
+                  {
+                    $ne: true,
+                  },
+              },
+              {
+                $set: {
+                  status:
+                    "cancelled",
+                  cancelledAt:
+                    now,
+                  cancelReason:
+                    "หมดเวลาชำระเงิน",
+                  "metadata.stockReserved":
+                    false,
+                  "metadata.stockReleased":
+                    true,
+                },
+              },
+              {
+                new: true,
+                session,
+              },
+            );
+
+          if (!updated) {
+            const latest =
+              await Order.findOne({
+                orderId,
+              }).session(session);
+
+            if (
+              latest?.metadata
+                ?.stockReleased ===
+              true
+            ) {
+              expiredOrder =
+                latest;
+              return;
+            }
+
+            throw new Error(
+              "ไม่สามารถ expire Order ได้",
+            );
+          }
+
+          const stockResult =
+            await Product.updateOne(
+              {
+                productId:
+                  updated.productId,
+              },
+              {
+                $inc: {
+                  stock:
+                    updated.quantity,
+                },
+              },
+              {
+                session,
+              },
+            );
+
+          if (
+            stockResult.matchedCount !==
+            1
+          ) {
+            throw new Error(
+              `ไม่พบ Product สำหรับคืน Stock: ${updated.productId}`,
+            );
+          }
+
+          if (
+            stockResult.modifiedCount !==
+            1
+          ) {
+            throw new Error(
+              `ไม่สามารถคืน Stock ของ Product: ${updated.productId}`,
+            );
+          }
+
+          expiredOrder =
+            updated;
         },
       );
 
-    if (!order) {
-      return Order.findOne({
-        orderId,
-      });
+      if (!expiredOrder) {
+        throw new Error(
+          "Expire Order ไม่ได้ผลลัพธ์",
+        );
+      }
+
+      return expiredOrder;
+    } finally {
+      await session.endSession();
     }
-
-    await releaseStock(
-      order.productId,
-      order.quantity,
-    );
-
-    return order;
   },
 
   async refundOrder(
