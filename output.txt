@@ -1,0 +1,5 @@
+
+> nexora-bot@1.0.0 build
+> tsc
+
+src/services/orderService.ts(626,3): error TS1005: ',' expected.

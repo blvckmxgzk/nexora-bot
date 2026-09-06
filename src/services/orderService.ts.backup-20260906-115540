@@ -487,32 +487,10 @@ export const orderService = {
 
   async cancelOrder(
     orderId: string,
-    reason?: string,
-  ): Promise<OrderDocument> {
-    const order = await Order.findOne({
-      orderId,
-    });
-
-    if (!order) {
-      throw new Error("ไม่พบคำสั่งซื้อ");
-    }
-
-    if (
-      order.status !== "pending" &&
-      order.status !== "awaiting_payment"
-    ) {
-      throw new Error(
-        `ไม่สามารถยกเลิกคำสั่งซื้อสถานะ ${order.status} ได้`,
-      );
-    }
-
-    const stockReserved =
-      order.metadata?.stockReserved === true;
-
-    // Stock has already been released.
-    // Only cancel the order without touching Product.stock.
-    if (!stockReserved) {
-      const updated = await Order.findOneAndUpdate(
+    reason: string,
+  ) {
+    const order =
+      await Order.findOneAndUpdate(
         {
           orderId,
           status: {
@@ -525,103 +503,49 @@ export const orderService = {
         {
           $set: {
             status: "cancelled",
-            cancelledAt: new Date(),
-            cancelReason: reason ?? null,
-            "metadata.stockReserved": false,
-            "metadata.stockReleased": true,
+            cancelledAt:
+              new Date(),
+            cancelReason:
+              reason.trim(),
+            "metadata.stockReserved":
+              false,
+            "metadata.stockReleased":
+              true,
           },
         },
         {
-          new: true,
+          returnDocument:
+            "after",
         },
       );
 
-      if (!updated) {
-        const current = await Order.findOne({
+    if (!order) {
+      const existing =
+        await Order.findOne({
           orderId,
         });
 
-        if (!current) {
-          throw new Error("ไม่พบคำสั่งซื้อ");
-        }
-
-        return current;
+      if (
+        existing?.status ===
+        "cancelled"
+      ) {
+        throw new Error(
+          "คำสั่งซื้อนี้ถูกยกเลิกแล้ว",
+        );
       }
 
-      return updated;
+      throw new Error(
+        "คำสั่งซื้อนี้ไม่สามารถยกเลิกได้",
+      );
     }
 
-    // Atomically claim the stock-release operation.
-    // Only one concurrent request can pass this condition.
-    const updated = await Order.findOneAndUpdate(
-      {
-        orderId,
-        status: {
-          $in: [
-            "pending",
-            "awaiting_payment",
-          ],
-        },
-        "metadata.stockReserved": true,
-        "metadata.stockReleased": {
-          $ne: true,
-        },
-      },
-      {
-        $set: {
-          status: "cancelled",
-          cancelledAt: new Date(),
-          cancelReason: reason ?? null,
-          "metadata.stockReserved": false,
-          "metadata.stockReleased": true,
-        },
-      },
-      {
-        new: true,
-      },
+    await releaseStock(
+      order.productId,
+      order.quantity,
     );
 
-    if (!updated) {
-      const current = await Order.findOne({
-        orderId,
-      });
-
-      if (!current) {
-        throw new Error("ไม่พบคำสั่งซื้อ");
-      }
-
-      // Another request already cancelled/released this order.
-      return current;
-    }
-
-    try {
-      await releaseStock(
-        updated.productId,
-        updated.quantity,
-      );
-    } catch (error) {
-      console.error(
-        `[OrderService] Failed to release stock for ${orderId}:`,
-        error,
-      );
-
-      await Order.updateOne(
-        {
-          orderId,
-          status: "cancelled",
-        },
-        {
-          $set: {
-            "metadata.stockReleaseFailed": true,
-          },
-        },
-      );
-
-      throw error;
-    }
-
-    return updated;
-  }
+    return order;
+  },
 
   async expireOrder(
     orderId: string,

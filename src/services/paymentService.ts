@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+
 import { Payment } from "../models/Payment.js";
 import { Order } from "../models/Order.js";
 import { Shop } from "../models/Shop.js";
