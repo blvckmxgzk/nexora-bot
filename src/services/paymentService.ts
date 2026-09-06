@@ -19,6 +19,10 @@ import {
   sendBuyerOrderPaidDM,
 } from "./marketplace/buyerOrderNotificationService.js";
 
+import {
+  sendSellerOrderPaidDM,
+} from "./marketplace/sellerOrderNotificationService.js";
+
 export const paymentService = {
   async getByPaymentId(
     paymentId: string,
@@ -500,6 +504,33 @@ export const paymentService = {
     } catch (error) {
       console.error(
         `⚠️ Failed to send buyer paid DM for Order ${updated.orderId}:`,
+        error,
+      );
+    }
+
+    /*
+     * แจ้ง Seller ว่าชำระเงินสำเร็จ
+     *
+     * DM ล้มเหลวจะไม่ทำให้ Payment ล้มเหลว
+     */
+    try {
+      const discordClient =
+        getMarketplaceDiscordClient();
+
+      const sellerDmSent =
+        await sendSellerOrderPaidDM(
+          discordClient,
+          updated.orderId,
+        );
+
+      if (!sellerDmSent) {
+        console.warn(
+          `⚠️ Seller DM was not sent: Order ${updated.orderId}`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        `⚠️ Failed to send seller paid DM for Order ${updated.orderId}:`,
         error,
       );
     }
