@@ -1,5 +1,6 @@
 import { Order } from "../models/Order.js";
 import { Product } from "../models/Product.js";
+import { Shop } from "../models/Shop.js";
 
 function createOrderId(): string {
   return (
@@ -154,6 +155,26 @@ export const orderService = {
 
       await order.save();
 
+      /*
+       * Order ถูกสร้างสำเร็จแล้ว
+       * เพิ่ม totalOrders เพียงครั้งเดียว
+       */
+      await Shop.findOneAndUpdate(
+        {
+          shopId:
+            data.shopId,
+        },
+        {
+          $inc: {
+            totalOrders: 1,
+          },
+        },
+      );
+
+      console.log(
+        `🧾 Order created: ${order.orderId} → Shop ${data.shopId} totalOrders +1`,
+      );
+
       return order;
     } catch (error) {
       await releaseStock(
@@ -188,7 +209,8 @@ export const orderService = {
           },
         },
         {
-          returnDocument: "after",
+          returnDocument:
+            "after",
         },
       );
 
@@ -279,6 +301,13 @@ export const orderService = {
     orderId: string,
     deliveryData: unknown = {},
   ) {
+    /*
+     * เปลี่ยนสถานะเป็น completed แบบ atomic
+     *
+     * เพราะ query รับเฉพาะ paid / processing
+     * การกด Complete ซ้ำจะไม่ผ่าน query นี้
+     * และจะไม่เพิ่ม completedOrders ซ้ำ
+     */
     const order =
       await Order.findOneAndUpdate(
         {
@@ -304,10 +333,53 @@ export const orderService = {
       );
 
     if (!order) {
+      const existing =
+        await Order.findOne({
+          orderId,
+        });
+
+      if (
+        existing?.status ===
+        "completed"
+      ) {
+        return existing;
+      }
+
       throw new Error(
         "คำสั่งซื้อนี้ไม่สามารถทำให้สำเร็จได้",
       );
     }
+
+    /*
+     * Order เพิ่งเปลี่ยนเป็น completed สำเร็จ
+     * เพิ่ม completedOrders เพียงครั้งเดียว
+     */
+    const shop =
+      await Shop.findOneAndUpdate(
+        {
+          shopId:
+            order.shopId,
+        },
+        {
+          $inc: {
+            completedOrders: 1,
+          },
+        },
+        {
+          returnDocument:
+            "after",
+        },
+      );
+
+    if (!shop) {
+      throw new Error(
+        "ไม่พบร้านค้าของคำสั่งซื้อ",
+      );
+    }
+
+    console.log(
+      `✅ Order completed: ${order.orderId} → Shop ${order.shopId} completedOrders = ${shop.completedOrders}`,
+    );
 
     return order;
   },

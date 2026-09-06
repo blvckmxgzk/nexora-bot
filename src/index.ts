@@ -23,6 +23,10 @@ import {
   createApiServer,
 } from "./api/server.js";
 
+import {
+  setMarketplaceDiscordClient,
+} from "./services/marketplace/marketplaceNotificationService.js";
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -59,6 +63,10 @@ async function bootstrap(): Promise<void> {
   await commandHandler.loadCommands();
 
   await eventHandler.loadEvents(
+    client,
+  );
+
+  setMarketplaceDiscordClient(
     client,
   );
 

@@ -1,6 +1,7 @@
 import { Payment } from "../models/Payment.js";
 import { Order } from "../models/Order.js";
 import { Shop } from "../models/Shop.js";
+import { Product } from "../models/Product.js";
 
 import {
   paymentAccountService,
@@ -10,9 +11,13 @@ import {
   paymentProviderRegistry,
 } from "./payment/paymentProviderRegistry.js";
 
-import type {
-  PaymentProviderName,
-} from "./payment/paymentProvider.js";
+import {
+  getMarketplaceDiscordClient,
+} from "./marketplace/marketplaceNotificationService.js";
+
+import {
+  sendBuyerOrderPaidDM,
+} from "./marketplace/buyerOrderNotificationService.js";
 
 export const paymentService = {
   async getByPaymentId(
@@ -303,6 +308,11 @@ export const paymentService = {
       );
     }
 
+    /*
+     * ถ้า Payment ถูก mark paid ไปแล้ว
+     * ไม่ต้องเพิ่ม Product.sold ซ้ำ
+     * และไม่ต้องส่ง DM ซ้ำ
+     */
     if (
       payment.status ===
       "paid"
@@ -332,6 +342,13 @@ export const paymentService = {
       );
     }
 
+    /*
+     * เปลี่ยน Payment จาก pending → paid
+     *
+     * จุดนี้เป็น atomic update
+     * ดังนั้น webhook ซ้ำ / กด Mark as Paid ซ้ำ
+     * จะไม่สามารถผ่านเงื่อนไข pending ได้อีก
+     */
     const updated =
       await Payment.findOneAndUpdate(
         {
@@ -372,28 +389,120 @@ export const paymentService = {
       );
     }
 
-    await Order.findOneAndUpdate(
-      {
+    /*
+     * Payment เพิ่งเปลี่ยนเป็น paid สำเร็จ
+     * ดังนั้นเพิ่มจำนวนขายของ Product เพียงครั้งเดียว
+     */
+    const order =
+      await Order.findOne({
         orderId:
           updated.orderId,
-        status:
-          "awaiting_payment",
-        paymentId:
-          updated.paymentId,
-      },
-      {
-        $set: {
-          status: "paid",
-          paidAt:
-            updated.paidAt ??
-            new Date(),
+      });
+
+    if (!order) {
+      throw new Error(
+        "ไม่พบ Order ที่ผูกกับ Payment",
+      );
+    }
+
+    if (
+      order.productId &&
+      order.quantity > 0
+    ) {
+      const product =
+        await Product.findOneAndUpdate(
+          {
+            productId:
+              order.productId,
+          },
+          {
+            $inc: {
+              sold:
+                order.quantity,
+            },
+          },
+          {
+            returnDocument:
+              "after",
+          },
+        );
+
+      if (!product) {
+        throw new Error(
+          "ไม่พบสินค้าเพื่ออัปเดตยอดขาย",
+        );
+      }
+
+      console.log(
+        `💰 Sale recorded: ${order.productName} +${order.quantity} sold (total: ${product.sold})`,
+      );
+    }
+
+    /*
+     * เปลี่ยน Order → paid
+     */
+    const updatedOrder =
+      await Order.findOneAndUpdate(
+        {
+          orderId:
+            updated.orderId,
+          status:
+            "awaiting_payment",
+          paymentId:
+            updated.paymentId,
         },
-      },
-      {
-        returnDocument:
-          "after",
-      },
+        {
+          $set: {
+            status: "paid",
+            paidAt:
+              updated.paidAt ??
+              new Date(),
+          },
+        },
+        {
+          returnDocument:
+            "after",
+        },
+      );
+
+    if (!updatedOrder) {
+      console.warn(
+        `⚠️ Payment ${updated.paymentId} paid แต่ไม่สามารถเปลี่ยน Order ${updated.orderId} เป็น PAID ได้`,
+      );
+    }
+
+    console.log(
+      `✅ Payment paid: ${updated.paymentId} → Order ${updated.orderId} → PAID`,
     );
+
+    /*
+     * ส่ง DM ให้ Buyer หลังชำระเงินสำเร็จ
+     *
+     * สำคัญ:
+     * DM ล้มเหลวจะไม่ทำให้ Payment ล้มเหลว
+     * เพราะเงินถูก mark paid ไปแล้ว
+     */
+    try {
+      const discordClient =
+        getMarketplaceDiscordClient();
+
+      const dmSent =
+        await sendBuyerOrderPaidDM(
+          discordClient,
+          updated.orderId,
+        );
+
+      if (!dmSent) {
+        console.warn(
+          `⚠️ Buyer DM was not sent: Order ${updated.orderId}`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        `⚠️ Failed to send buyer paid DM for Order ${updated.orderId}:`,
+        error,
+      );
+    }
 
     return updated;
   },
