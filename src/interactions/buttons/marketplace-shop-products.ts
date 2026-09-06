@@ -3,13 +3,14 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  MessageFlags,
   StringSelectMenuBuilder,
-  StringSelectMenuOptionBuilder,
   type ButtonInteraction,
 } from "discord.js";
 
 import { Shop } from "../../models/Shop.js";
 import { Product } from "../../models/Product.js";
+import { isShopOpenAt } from "../../services/shopHoursService.js";
 
 export const customId =
   "nexora_marketplace_shop_products:";
@@ -23,9 +24,10 @@ export async function execute(
   if (!shopId) {
     await interaction.reply({
       content:
-        "❌ ไม่พบ Shop ID",
-      ephemeral: true,
+        "❌ Shop ID ไม่ถูกต้อง",
+      flags: MessageFlags.Ephemeral,
     });
+
     return;
   }
 
@@ -36,19 +38,38 @@ export async function execute(
     });
 
   if (!shop) {
-    await interaction.reply({
-      content:
-        "❌ ร้านค้านี้ไม่ได้เปิดให้บริการในขณะนี้",
-      ephemeral: true,
-    });
+    if (
+      interaction.message.flags.has(
+        MessageFlags.Ephemeral,
+      )
+    ) {
+      await interaction.update({
+        content:
+          "❌ ร้านค้านี้ไม่พร้อมให้บริการ",
+        embeds: [],
+        components: [],
+      });
+    } else {
+      await interaction.reply({
+        content:
+          "❌ ร้านค้านี้ไม่พร้อมให้บริการ",
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
     return;
   }
+
+  const status =
+    isShopOpenAt(shop);
 
   const products =
     await Product.find({
       shopId: shop.shopId,
       active: true,
-      stock: { $gt: 0 },
+      stock: {
+        $gt: 0,
+      },
     })
       .sort({
         sold: -1,
@@ -56,95 +77,117 @@ export async function execute(
       })
       .limit(25);
 
-  if (products.length === 0) {
-    await interaction.reply({
-      content:
-        `📦 ร้าน **${shop.name}** ยังไม่มีสินค้าที่พร้อมจำหน่าย`,
-      ephemeral: true,
-    });
-    return;
-  }
-
-  const menu =
-    new StringSelectMenuBuilder()
-      .setCustomId(
-        "nexora_marketplace_product",
-      )
-      .setPlaceholder(
-        "📦 เลือกสินค้าที่ต้องการดู",
-      )
-      .setMinValues(1)
-      .setMaxValues(1);
-
-  for (const product of products) {
-    menu.addOptions(
-      new StringSelectMenuOptionBuilder()
-        .setLabel(
-          product.name.slice(0, 100),
-        )
-        .setDescription(
-          `฿${product.price.toLocaleString("th-TH")} • Stock ${product.stock}`,
-        )
-        .setValue(
-          product.productId,
-        )
-        .setEmoji("📦"),
-    );
-  }
-
-  const productLines =
-    products.map(
-      (product) =>
-        [
-          `📦 **${product.name}**`,
-          `> 💰 ฿${product.price.toLocaleString("th-TH")} • 📊 Stock: ${product.stock.toLocaleString("th-TH")}`,
-          `> 🛒 ขายแล้ว: ${product.sold.toLocaleString("th-TH")}`,
-        ].join("\n"),
-    );
-
   const embed =
     new EmbedBuilder()
-      .setColor(0x8b5cf6)
+      .setColor(
+        status.open
+          ? 0x8b5cf6
+          : 0xed4245,
+      )
       .setTitle(
-        `📦 สินค้าของ ${shop.name}`,
+        `📦 สินค้าจาก ${shop.name}`,
       )
       .setDescription(
         [
-          "เลือกสินค้าที่ต้องการดูรายละเอียด",
+          status.open
+            ? "🟢 **ร้านเปิดอยู่ — สามารถสั่งซื้อได้**"
+            : "🔴 **ร้านปิดอยู่ — ไม่สามารถสั่งซื้อได้ในขณะนี้**",
           "",
-          productLines.join("\n\n"),
+          products.length
+            ? "เลือกสินค้าจากเมนูด้านล่าง"
+            : "ร้านนี้ยังไม่มีสินค้าที่พร้อมขาย",
         ].join("\n"),
       )
       .setFooter({
         text:
-          `NEXORA Marketplace • ${shop.shopId}`,
+          "NEXORA Marketplace • Shop Products",
       })
       .setTimestamp();
 
-  const menuRow =
-    new ActionRowBuilder<StringSelectMenuBuilder>()
-      .addComponents(menu);
+  const components: any[] = [];
 
-  const backRow =
+  if (products.length > 0) {
+    const menu =
+      new StringSelectMenuBuilder()
+        .setCustomId(
+          "nexora_marketplace_product",
+        )
+        .setPlaceholder(
+          "📦 เลือกสินค้าที่ต้องการดู",
+        )
+        .addOptions(
+          products.map(
+            (product) => ({
+              label:
+                product.name.slice(
+                  0,
+                  100,
+                ),
+              description:
+                `฿${product.price.toLocaleString("th-TH")} • Stock ${product.stock}`
+                  .slice(
+                    0,
+                    100,
+                  ),
+              value:
+                product.productId,
+              emoji: "📦",
+            }),
+          ),
+        );
+
+    components.push(
+      new ActionRowBuilder<StringSelectMenuBuilder>()
+        .addComponents(menu),
+    );
+  }
+
+  const buttons =
     new ActionRowBuilder<ButtonBuilder>()
       .addComponents(
         new ButtonBuilder()
           .setCustomId(
-            "nexora_shop_browse",
+            `nexora_marketplace_shop:${shop.shopId}`,
           )
-          .setLabel("Marketplace")
-          .setEmoji("🛍️")
+          .setLabel("กลับหน้าร้าน")
+          .setEmoji("↩️")
+          .setStyle(
+            ButtonStyle.Secondary,
+          ),
+
+        new ButtonBuilder()
+          .setCustomId(
+            `nexora_marketplace_shop_reviews:${shop.shopId}`,
+          )
+          .setLabel("รีวิวร้าน")
+          .setEmoji("⭐")
           .setStyle(
             ButtonStyle.Secondary,
           ),
       );
 
-  await interaction.reply({
+  components.push(buttons);
+
+  const payload = {
+    content: "",
     embeds: [embed],
-    components: [
-      menuRow,
-      backRow,
-    ],
-    ephemeral: true,
+    components,
+  };
+
+  if (
+    interaction.message.flags.has(
+      MessageFlags.Ephemeral,
+    )
+  ) {
+    await interaction.update(
+      payload,
+    );
+
+    return;
+  }
+
+  await interaction.reply({
+    ...payload,
+    flags: MessageFlags.Ephemeral,
   });
 }

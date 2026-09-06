@@ -1,141 +1,219 @@
-import { Schema, model } from "mongoose";
+import {
+  Schema,
+  model,
+} from "mongoose";
 
-const shopSchema = new Schema(
-  {
-    shopId: {
-      type: String,
-      required: true,
-      unique: true,
-      index: true,
+const dayScheduleSchema =
+  new Schema(
+    {
+      enabled: {
+        type: Boolean,
+        default: true,
+      },
+
+      open: {
+        type: String,
+        default: "09:00",
+      },
+
+      close: {
+        type: String,
+        default: "22:00",
+      },
     },
-
-    ownerId: {
-      type: String,
-      required: true,
-      unique: true,
-      index: true,
+    {
+      _id: false,
     },
+  );
 
-    forumThreadId: {
-      type: String,
-      default: null,
-      index: true,
-    },
+const shopSchema =
+  new Schema(
+    {
+      shopId: {
+        type: String,
+        required: true,
+        unique: true,
+        index: true,
+      },
 
-    name: {
-      type: String,
-      required: true,
-      maxlength: 100,
-      trim: true,
-    },
+      ownerId: {
+        type: String,
+        required: true,
+        unique: true,
+        index: true,
+      },
 
-    description: {
-      type: String,
-      default: "",
-      maxlength: 1000,
-      trim: true,
-    },
+      forumThreadId: {
+        type: String,
+        default: null,
+        index: true,
+      },
 
-    category: {
-      type: String,
-      enum: [
-        "game_topup",
-        "game_keys",
-        "gift_cards",
-        "digital_services",
-        "other",
-      ],
-      default: "other",
-    },
+      name: {
+        type: String,
+        required: true,
+        maxlength: 100,
+        trim: true,
+      },
 
-    status: {
-      type: String,
-      enum: [
-        "pending",
-        "verified",
-        "rejected",
-        "suspended",
-        "closed",
-      ],
-      default: "pending",
-      index: true,
-    },
+      description: {
+        type: String,
+        default: "",
+        maxlength: 1000,
+        trim: true,
+      },
 
-    closedFromStatus: {
-      type: String,
-      enum: [
-        "pending",
-        "verified",
-        "rejected",
-      ],
-      default: null,
-    },
+      category: {
+        type: String,
+        enum: [
+          "game_topup",
+          "game_keys",
+          "gift_cards",
+          "digital_services",
+          "other",
+        ],
+        default: "other",
+      },
 
-    verifiedAt: {
-      type: Date,
-      default: null,
-    },
+      status: {
+        type: String,
+        enum: [
+          "pending",
+          "verified",
+          "rejected",
+          "suspended",
+          "closed",
+        ],
+        default: "pending",
+        index: true,
+      },
 
-    verifiedBy: {
-      type: String,
-      default: null,
-    },
+      closedFromStatus: {
+        type: String,
+        enum: [
+          "pending",
+          "verified",
+          "rejected",
+        ],
+        default: null,
+      },
 
-    rejectionReason: {
-      type: String,
-      default: null,
-    },
+      verifiedAt: {
+        type: Date,
+        default: null,
+      },
 
-    paymentMethods: {
-      type: [String],
-      enum: [
-        "promptpay",
-        "truemoney",
-      ],
-      default: [],
-    },
-
-    paymentDetails: {
-      promptpay: {
+      verifiedBy: {
         type: String,
         default: null,
       },
 
-      truemoney: {
+      rejectionReason: {
         type: String,
         default: null,
       },
-    },
 
-    rating: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 5,
-    },
+      paymentMethods: {
+        type: [String],
+        enum: [
+          "promptpay",
+          "truemoney",
+        ],
+        default: [],
+      },
 
-    reviewCount: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
+      paymentDetails: {
+        promptpay: {
+          type: String,
+          default: null,
+        },
 
-    completedOrders: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
+        truemoney: {
+          type: String,
+          default: null,
+        },
+      },
 
-    totalOrders: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-  },
-  {
-    timestamps: true,
-    versionKey: false,
-  },
-);
+      rating: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 5,
+      },
 
-export const Shop = model("Shop", shopSchema);
+      reviewCount: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      completedOrders: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      totalOrders: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      businessHours: {
+        monday: {
+          type: dayScheduleSchema,
+          default: () => ({}),
+        },
+
+        tuesday: {
+          type: dayScheduleSchema,
+          default: () => ({}),
+        },
+
+        wednesday: {
+          type: dayScheduleSchema,
+          default: () => ({}),
+        },
+
+        thursday: {
+          type: dayScheduleSchema,
+          default: () => ({}),
+        },
+
+        friday: {
+          type: dayScheduleSchema,
+          default: () => ({}),
+        },
+
+        saturday: {
+          type: dayScheduleSchema,
+          default: () => ({}),
+        },
+
+        sunday: {
+          type: dayScheduleSchema,
+          default: () => ({}),
+        },
+      },
+
+      timezone: {
+        type: String,
+        default: "Asia/Bangkok",
+      },
+
+      autoOpenClose: {
+        type: Boolean,
+        default: true,
+      },
+    },
+    {
+      timestamps: true,
+      versionKey: false,
+    },
+  );
+
+export const Shop =
+  model(
+    "Shop",
+    shopSchema,
+  );

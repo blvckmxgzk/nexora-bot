@@ -1,14 +1,14 @@
 import {
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
   type ButtonInteraction,
 } from "discord.js";
 
 import { Product } from "../../models/Product.js";
 import { Shop } from "../../models/Shop.js";
-import { orderService } from "../../services/orderService.js";
+import { isShopOpenAt } from "../../services/shopHoursService.js";
 
 export const customId =
   "nexora_product_buy:";
@@ -21,11 +21,9 @@ export async function execute(
 
   if (!productId) {
     await interaction.reply({
-      content:
-        "❌ ไม่พบ Product ID",
+      content: "❌ Product ID ไม่ถูกต้อง",
       ephemeral: true,
     });
-
     return;
   }
 
@@ -33,7 +31,9 @@ export async function execute(
     await Product.findOne({
       productId,
       active: true,
-      stock: { $gt: 0 },
+      stock: {
+        $gt: 0,
+      },
     });
 
   if (!product) {
@@ -42,7 +42,6 @@ export async function execute(
         "❌ สินค้านี้ไม่มีอยู่แล้ว หรือสินค้าหมด",
       ephemeral: true,
     });
-
     return;
   }
 
@@ -58,121 +57,61 @@ export async function execute(
         "❌ ร้านค้านี้ไม่พร้อมให้บริการ",
       ephemeral: true,
     });
-
     return;
   }
 
-  if (
-    shop.ownerId ===
-    interaction.user.id
-  ) {
+  if (shop.ownerId === interaction.user.id) {
     await interaction.reply({
       content:
         "❌ คุณไม่สามารถซื้อสินค้าจากร้านของตัวเองได้",
       ephemeral: true,
     });
-
     return;
   }
 
-  const order =
-    await orderService.createOrder({
-      buyerId:
-        interaction.user.id,
-      sellerId:
-        shop.ownerId,
-      shopId:
-        shop.shopId,
-      productId:
-        product.productId,
-      productName:
-        product.name,
-      quantity: 1,
-      unitPrice:
-        product.price,
+  const shopStatus =
+    isShopOpenAt(shop);
+
+  if (!shopStatus.open) {
+    await interaction.reply({
+      content:
+        "🔴 ร้านปิดอยู่ในขณะนี้ ไม่สามารถสั่งซื้อได้",
+      ephemeral: true,
     });
+    return;
+  }
 
-  const embed =
-    new EmbedBuilder()
-      .setColor(0xf59e0b)
-      .setTitle("🛒 สร้างคำสั่งซื้อแล้ว")
-      .setDescription(
-        [
-          `📦 **${product.name}**`,
-          "",
-          "ระบบสร้าง Order ให้คุณแล้ว",
-          "ขั้นตอนถัดไปคือเลือกช่องทางชำระเงิน",
-        ].join("\n"),
-      )
-      .addFields(
-        {
-          name: "🆔 Order ID",
-          value:
-            `\`${order.orderId}\``,
-          inline: true,
-        },
-        {
-          name: "📦 จำนวน",
-          value: "1",
-          inline: true,
-        },
-        {
-          name: "💰 ยอดรวม",
-          value:
-            `**฿${order.totalAmount.toLocaleString("th-TH")}**`,
-          inline: true,
-        },
-        {
-          name: "🛡️ ผู้ขาย",
-          value:
-            shop.name,
-          inline: true,
-        },
-        {
-          name: "📋 สถานะ",
-          value:
-            "🟡 รอเลือกวิธีชำระเงิน",
-          inline: true,
-        },
-      )
-      .setFooter({
-        text:
-          "NEXORA Marketplace • Order System",
-      })
-      .setTimestamp();
-
-  const paymentButton =
-    new ButtonBuilder()
+  const modal =
+    new ModalBuilder()
       .setCustomId(
-        `nexora_order_payment:${order.orderId}`,
+        `nexora_product_buy_modal:${product.productId}`,
       )
-      .setLabel("เลือกวิธีชำระเงิน")
-      .setEmoji("💳")
-      .setStyle(
-        ButtonStyle.Primary,
+      .setTitle(
+        "🛒 ซื้อสินค้า",
       );
 
-  const cancelButton =
-    new ButtonBuilder()
-      .setCustomId(
-        `nexora_order_cancel:${order.orderId}`,
+  const quantityInput =
+    new TextInputBuilder()
+      .setCustomId("quantity")
+      .setLabel("จำนวนสินค้า")
+      .setPlaceholder(
+        `กรอกจำนวน 1-${product.stock}`,
       )
-      .setLabel("ยกเลิก Order")
-      .setEmoji("❌")
       .setStyle(
-        ButtonStyle.Danger,
-      );
+        TextInputStyle.Short,
+      )
+      .setRequired(true)
+      .setMinLength(1)
+      .setMaxLength(6);
 
-  const row =
-    new ActionRowBuilder<ButtonBuilder>()
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>()
       .addComponents(
-        paymentButton,
-        cancelButton,
-      );
+        quantityInput,
+      ),
+  );
 
-  await interaction.reply({
-    embeds: [embed],
-    components: [row],
-    ephemeral: true,
-  });
+  await interaction.showModal(
+    modal,
+  );
 }

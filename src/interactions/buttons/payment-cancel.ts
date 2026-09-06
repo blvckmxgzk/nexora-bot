@@ -1,9 +1,8 @@
 import {
+  EmbedBuilder,
   type ButtonInteraction,
 } from "discord.js";
 
-import { Payment } from "../../models/Payment.js";
-import { orderService } from "../../services/orderService.js";
 import { paymentService } from "../../services/paymentService.js";
 
 export const customId =
@@ -18,64 +17,74 @@ export async function execute(
   if (!paymentId) {
     await interaction.reply({
       content:
-        "❌ ไม่พบ Payment ID",
+        "❌ Payment ID ไม่ถูกต้อง",
       ephemeral: true,
     });
     return;
   }
 
-  const payment =
-    await Payment.findOne({
+  try {
+    const payment =
+      await paymentService.getByPaymentId(
+        paymentId,
+      );
+
+    if (!payment) {
+      await interaction.reply({
+        content:
+          "❌ ไม่พบ Payment",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (
+      payment.buyerId !==
+      interaction.user.id
+    ) {
+      await interaction.reply({
+        content:
+          "❌ คุณไม่มีสิทธิ์ยกเลิก Payment นี้",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await paymentService.cancelPayment(
       paymentId,
-    });
-
-  if (!payment) {
-    await interaction.reply({
-      content:
-        "❌ ไม่พบ Payment",
-      ephemeral: true,
-    });
-    return;
-  }
-
-  if (
-    payment.buyerId !==
-    interaction.user.id
-  ) {
-    await interaction.reply({
-      content:
-        "❌ คุณไม่มีสิทธิ์ยกเลิก Payment นี้",
-      ephemeral: true,
-    });
-    return;
-  }
-
-  if (
-    payment.status !==
-    "pending"
-  ) {
-    await interaction.reply({
-      content:
-        "❌ Payment นี้ไม่สามารถยกเลิกได้",
-      ephemeral: true,
-    });
-    return;
-  }
-
-  await paymentService.cancelPayment(
-    paymentId,
-  );
-
-  const order =
-    await orderService.cancelOrder(
-      payment.orderId,
-      "ยกเลิกการชำระเงินโดยผู้ซื้อ",
     );
 
-  await interaction.update({
-    content:
-      `✅ ยกเลิกการชำระเงินแล้ว\nคำสั่งซื้อ \`${order.orderId}\` ถูกยกเลิก และคืน Stock ให้ร้านค้าแล้ว`,
-    embeds: [],
-    components: [],
-  });
+    const embed =
+      new EmbedBuilder()
+        .setColor(0xed4245)
+        .setTitle(
+          "❌ ยกเลิกการชำระเงินแล้ว",
+        )
+        .setDescription(
+          [
+            `🧾 **Order ID:** \`${payment.orderId}\``,
+            `💳 **Payment ID:** \`${payment.paymentId}\``,
+            "",
+            "Stock ที่ถูกกันไว้สำหรับคำสั่งซื้อนี้จะถูกคืนตามระบบ Order",
+          ].join("\n"),
+        )
+        .setFooter({
+          text:
+            "NEXORA Marketplace • Payment Cancelled",
+        })
+        .setTimestamp();
+
+    await interaction.update({
+      embeds: [embed],
+      components: [],
+    });
+  } catch (error) {
+    await interaction.reply({
+      content:
+        error instanceof Error
+          ? `❌ ${error.message}`
+          : "❌ ไม่สามารถยกเลิก Payment ได้",
+      ephemeral: true,
+    });
+  }
 }

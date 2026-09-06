@@ -1,16 +1,16 @@
 import {
   EmbedBuilder,
-  type ButtonInteraction,
+  type ModalSubmitInteraction,
 } from "discord.js";
 
 import { Product } from "../../models/Product.js";
 import { Shop } from "../../models/Shop.js";
 
 export const customId =
-  "nexora_product_toggle:";
+  "nexora_product_stock_modal:";
 
 export async function execute(
-  interaction: ButtonInteraction,
+  interaction: ModalSubmitInteraction,
 ): Promise<void> {
   const productId =
     interaction.customId.split(":")[1];
@@ -36,18 +36,6 @@ export async function execute(
     return;
   }
 
-  if (
-    shop.status === "closed" ||
-    shop.status === "suspended"
-  ) {
-    await interaction.reply({
-      content:
-        "❌ ร้านค้านี้ไม่สามารถเปลี่ยนสถานะสินค้าได้",
-      ephemeral: true,
-    });
-    return;
-  }
-
   const product =
     await Product.findOne({
       productId,
@@ -64,33 +52,46 @@ export async function execute(
     return;
   }
 
-  product.active =
-    !product.active;
+  const stockText =
+    interaction.fields
+      .getTextInputValue("stock")
+      .trim();
+
+  const stock =
+    Number(stockText);
+
+  if (
+    !Number.isInteger(stock) ||
+    stock < 0
+  ) {
+    await interaction.reply({
+      content:
+        "❌ Stock ต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const oldStock =
+    product.stock;
+
+  product.stock =
+    stock;
 
   await product.save();
 
-  const statusText =
-    product.active
-      ? "🟢 เปิดขาย"
-      : "🔴 ปิดขาย";
-
   const embed =
     new EmbedBuilder()
-      .setColor(
-        product.active
-          ? 0x57f287
-          : 0xed4245,
-      )
+      .setColor(0x57f287)
       .setTitle(
-        product.active
-          ? "🟢 เปิดขายสินค้าแล้ว"
-          : "🔴 ปิดการขายสินค้าแล้ว",
+        "📦 อัปเดต Stock สำเร็จ",
       )
       .setDescription(
         [
           `📦 **${product.name}**`,
           "",
-          `สถานะใหม่: **${statusText}**`,
+          `ก่อนหน้า: **${oldStock.toLocaleString("th-TH")}**`,
+          `ปัจจุบัน: **${product.stock.toLocaleString("th-TH")}**`,
           "",
           `🆔 Product ID: \`${product.productId}\``,
         ].join("\n"),
@@ -101,9 +102,8 @@ export async function execute(
       })
       .setTimestamp();
 
-  await interaction.update({
+  await interaction.reply({
     embeds: [embed],
-    components: [],
-    content: "",
+    ephemeral: true,
   });
 }

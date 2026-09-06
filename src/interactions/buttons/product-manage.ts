@@ -3,6 +3,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  StringSelectMenuBuilder,
   type ButtonInteraction,
 } from "discord.js";
 
@@ -15,34 +16,36 @@ export const customId =
 export async function execute(
   interaction: ButtonInteraction,
 ): Promise<void> {
-  const shop = await Shop.findOne({
-    ownerId: interaction.user.id,
-  });
+  const shop =
+    await Shop.findOne({
+      ownerId: interaction.user.id,
+    });
 
   if (!shop) {
     await interaction.reply({
-      content:
-        "❌ คุณยังไม่มีร้านค้า",
+      content: "❌ คุณยังไม่มีร้านค้า",
       ephemeral: true,
     });
     return;
   }
 
-  const products = await Product.find({
-    shopId: shop.shopId,
-  }).sort({
-    createdAt: -1,
-  });
+  if (shop.status === "closed") {
+    await interaction.reply({
+      content:
+        "🔒 ร้านค้าถูกปิดอยู่ ไม่สามารถจัดการสินค้าได้",
+      ephemeral: true,
+    });
+    return;
+  }
 
-  const activeCount = products.filter(
-    (product) => product.active,
-  ).length;
-
-  const inStockCount = products.filter(
-    (product) =>
-      product.active &&
-      product.stock > 0,
-  ).length;
+  const products =
+    await Product.find({
+      shopId: shop.shopId,
+    })
+      .sort({
+        createdAt: -1,
+      })
+      .limit(25);
 
   const embed =
     new EmbedBuilder()
@@ -50,41 +53,61 @@ export async function execute(
       .setTitle("📦 จัดการสินค้า")
       .setDescription(
         [
-          `🏪 ร้าน: **${shop.name}**`,
+          `🏪 **${shop.name}**`,
           "",
-          "จัดการสินค้าทั้งหมดของร้านคุณได้จากเมนูด้านล่าง",
-          "",
-          "➕ **เพิ่มสินค้า**",
-          "└─ สร้างสินค้าใหม่สำหรับร้านของคุณ",
-          "",
-          "📋 **รายการสินค้า**",
-          "└─ ดู แก้ไข ลบ และเปิด/ปิดสินค้า",
+          products.length
+            ? "เลือกสินค้าที่ต้องการจัดการจากเมนูด้านล่าง"
+            : "ยังไม่มีสินค้าในร้านของคุณ",
         ].join("\n"),
       )
-      .addFields(
-        {
-          name: "📦 สินค้าทั้งหมด",
-          value: String(products.length),
-          inline: true,
-        },
-        {
-          name: "🟢 เปิดขาย",
-          value: String(activeCount),
-          inline: true,
-        },
-        {
-          name: "📈 มีสินค้า",
-          value: String(inStockCount),
-          inline: true,
-        },
-      )
+      .addFields({
+        name: "📊 สรุป",
+        value: [
+          `📦 สินค้าทั้งหมด: **${products.length}**`,
+          `🟢 เปิดขาย: **${products.filter((p) => p.active).length}**`,
+          `🔴 ปิดขาย: **${products.filter((p) => !p.active).length}**`,
+        ].join("\n"),
+        inline: false,
+      })
       .setFooter({
         text:
           "NEXORA Marketplace • Product Management",
       })
       .setTimestamp();
 
-  const row =
+  const components = [];
+
+  if (products.length > 0) {
+    const options =
+      products.map((product) => ({
+        label:
+          product.name.slice(0, 100),
+        description:
+          `฿${product.price.toLocaleString("th-TH")} • Stock ${product.stock}`,
+        value: product.productId,
+        emoji:
+          product.active
+            ? "🟢"
+            : "🔴",
+      }));
+
+    const menu =
+      new StringSelectMenuBuilder()
+        .setCustomId(
+          "nexora_product_manage_select",
+        )
+        .setPlaceholder(
+          "📦 เลือกสินค้าที่ต้องการจัดการ",
+        )
+        .addOptions(options);
+
+    components.push(
+      new ActionRowBuilder<StringSelectMenuBuilder>()
+        .addComponents(menu),
+    );
+  }
+
+  const actionRow =
     new ActionRowBuilder<ButtonBuilder>()
       .addComponents(
         new ButtonBuilder()
@@ -99,28 +122,20 @@ export async function execute(
 
         new ButtonBuilder()
           .setCustomId(
-            "nexora_product_list",
-          )
-          .setLabel("รายการสินค้า")
-          .setEmoji("📋")
-          .setStyle(
-            ButtonStyle.Primary,
-          ),
-
-        new ButtonBuilder()
-          .setCustomId(
             "nexora_shop_manage",
           )
-          .setLabel("กลับ")
+          .setLabel("กลับร้านค้า")
           .setEmoji("↩️")
           .setStyle(
             ButtonStyle.Secondary,
           ),
       );
 
-  await interaction.reply({
+  components.push(actionRow);
+
+  await interaction.update({
+    content: "",
     embeds: [embed],
-    components: [row],
-    ephemeral: true,
+    components,
   });
 }

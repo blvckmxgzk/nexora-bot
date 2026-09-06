@@ -4,25 +4,26 @@ import {
   ButtonStyle,
   EmbedBuilder,
   MessageFlags,
-  type StringSelectMenuInteraction,
+  type ButtonInteraction,
 } from "discord.js";
 
 import { Shop } from "../../models/Shop.js";
+import { Product } from "../../models/Product.js";
 import { isShopOpenAt } from "../../services/shopHoursService.js";
 
 export const customId =
-  "nexora_marketplace_shop";
+  "nexora_marketplace_shop:";
 
 export async function execute(
-  interaction: StringSelectMenuInteraction,
+  interaction: ButtonInteraction,
 ): Promise<void> {
   const shopId =
-    interaction.values[0];
+    interaction.customId.split(":")[1];
 
   if (!shopId) {
     await interaction.reply({
       content:
-        "❌ ไม่พบ Shop ID",
+        "❌ Shop ID ไม่ถูกต้อง",
       flags: MessageFlags.Ephemeral,
     });
 
@@ -38,7 +39,7 @@ export async function execute(
   if (!shop) {
     await interaction.reply({
       content:
-        "❌ ร้านค้านี้ไม่มีอยู่แล้ว หรือไม่ได้เป็น Verified Seller",
+        "❌ ไม่พบร้านค้านี้ หรือร้านค้านี้ไม่ได้เป็น Verified Seller แล้ว",
       flags: MessageFlags.Ephemeral,
     });
 
@@ -48,21 +49,25 @@ export async function execute(
   const status =
     isShopOpenAt(shop);
 
+  const productCount =
+    await Product.countDocuments({
+      shopId: shop.shopId,
+      active: true,
+      stock: {
+        $gt: 0,
+      },
+    });
+
   const rating =
     shop.reviewCount > 0
       ? `⭐ ${shop.rating.toFixed(2)} / 5 (${shop.reviewCount.toLocaleString("th-TH")} รีวิว)`
       : "⭐ ยังไม่มีรีวิว";
 
-  const scheduleText =
-    status.schedule
-      ? `${status.schedule.open} - ${status.schedule.close}`
-      : "ปิดวันนี้";
-
   const embed =
     new EmbedBuilder()
       .setColor(
         status.open
-          ? 0x57f287
+          ? 0x8b5cf6
           : 0xed4245,
       )
       .setTitle(
@@ -73,16 +78,36 @@ export async function execute(
           shop.description ||
             "ร้านค้านี้ยังไม่มีคำอธิบาย",
           "",
-          "🛡️ **Verified Seller**",
           status.open
-            ? "🟢 **ร้านเปิดอยู่**"
-            : "🔴 **ร้านปิดอยู่**",
+            ? "🟢 **ร้านเปิดอยู่ — สามารถสั่งซื้อได้**"
+            : "🔴 **ร้านปิดอยู่ — ไม่สามารถสั่งซื้อได้ในขณะนี้**",
         ].join("\n"),
       )
       .addFields(
         {
+          name: "🛡️ สถานะร้าน",
+          value:
+            "🟢 Verified Seller",
+          inline: true,
+        },
+        {
           name: "⭐ คะแนนร้าน",
           value: rating,
+          inline: true,
+        },
+        {
+          name: "🏷️ หมวดหมู่",
+          value:
+            shop.category ||
+            "ทั่วไป",
+          inline: true,
+        },
+        {
+          name: "📦 สินค้าพร้อมขาย",
+          value:
+            productCount.toLocaleString(
+              "th-TH",
+            ),
           inline: true,
         },
         {
@@ -94,29 +119,11 @@ export async function execute(
           inline: true,
         },
         {
-          name: "📦 ออเดอร์ทั้งหมด",
-          value:
-            shop.totalOrders.toLocaleString(
-              "th-TH",
-            ),
-          inline: true,
-        },
-        {
-          name: "🏷️ หมวดหมู่",
-          value:
-            `\`${shop.category}\``,
-          inline: true,
-        },
-        {
           name: "🕐 เวลาทำการ",
-          value: scheduleText,
-          inline: true,
-        },
-        {
-          name: "🌏 Timezone",
           value:
-            shop.timezone ||
-            "Asia/Bangkok",
+            status.schedule
+              ? `${status.schedule.open} - ${status.schedule.close}`
+              : "ปิดวันนี้",
           inline: true,
         },
         {
@@ -128,7 +135,7 @@ export async function execute(
       )
       .setFooter({
         text:
-          "NEXORA Marketplace • Shop Details",
+          "NEXORA Marketplace • Shop",
       })
       .setTimestamp();
 

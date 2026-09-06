@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
     "deploy": "npm run build && node dist/deploy-commands.js",
-    "seed:items": "npm run build && node dist/seed-items.js"
+    "seed:items": "npm run build && node dist/seed-items.js",
+    "test:marketplace": "npm run build && node scripts/marketplace-smoke-test.mjs"
   },
   "engines": {
     "node": ">=22.0.0"

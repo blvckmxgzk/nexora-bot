@@ -23,8 +23,12 @@ export async function execute(
 
   const name =
     new TextInputBuilder()
-      .setCustomId("product_name")
-      .setLabel("ชื่อสินค้า")
+      .setCustomId(
+        "product_name",
+      )
+      .setLabel(
+        "ชื่อสินค้า",
+      )
       .setPlaceholder(
         "เช่น RoV Voucher 100 บาท",
       )
@@ -40,7 +44,9 @@ export async function execute(
       .setCustomId(
         "product_description",
       )
-      .setLabel("รายละเอียดสินค้า")
+      .setLabel(
+        "รายละเอียดสินค้า",
+      )
       .setPlaceholder(
         "รายละเอียดสินค้า / วิธีส่งมอบ",
       )
@@ -53,9 +59,15 @@ export async function execute(
 
   const price =
     new TextInputBuilder()
-      .setCustomId("product_price")
-      .setLabel("ราคา (บาท)")
-      .setPlaceholder("เช่น 100")
+      .setCustomId(
+        "product_price",
+      )
+      .setLabel(
+        "ราคา (บาท)",
+      )
+      .setPlaceholder(
+        "เช่น 100",
+      )
       .setStyle(
         TextInputStyle.Short,
       )
@@ -64,8 +76,12 @@ export async function execute(
 
   const stock =
     new TextInputBuilder()
-      .setCustomId("product_stock")
-      .setLabel("จำนวนสินค้า")
+      .setCustomId(
+        "product_stock",
+      )
+      .setLabel(
+        "จำนวนสินค้า",
+      )
       .setPlaceholder(
         "เช่น 10",
       )
@@ -75,36 +91,20 @@ export async function execute(
       .setMaxLength(12)
       .setRequired(true);
 
-  const image =
-    new TextInputBuilder()
-      .setCustomId("product_image")
-      .setLabel(
-        "URL รูปสินค้า (ไม่ใส่ก็ได้)",
-      )
-      .setPlaceholder(
-        "https://example.com/image.png",
-      )
-      .setStyle(
-        TextInputStyle.Short,
-      )
-      .setMaxLength(500)
-      .setRequired(false);
-
   modal.addComponents(
     new ActionRowBuilder<TextInputBuilder>()
       .addComponents(name),
 
     new ActionRowBuilder<TextInputBuilder>()
-      .addComponents(description),
+      .addComponents(
+        description,
+      ),
 
     new ActionRowBuilder<TextInputBuilder>()
       .addComponents(price),
 
     new ActionRowBuilder<TextInputBuilder>()
       .addComponents(stock),
-
-    new ActionRowBuilder<TextInputBuilder>()
-      .addComponents(image),
   );
 
   await interaction.showModal(

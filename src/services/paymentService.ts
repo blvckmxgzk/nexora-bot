@@ -294,6 +294,50 @@ export const paymentService = {
       return existing;
     }
 
+    const order =
+      await Order.findOneAndUpdate(
+        {
+          orderId:
+            payment.orderId,
+          status:
+            "awaiting_payment",
+          paymentId:
+            payment.paymentId,
+        },
+        {
+          $set: {
+            status: "cancelled",
+            cancelledAt:
+              new Date(),
+            cancelReason:
+              "ยกเลิกการชำระเงิน",
+            "metadata.stockReserved":
+              false,
+            "metadata.stockReleased":
+              true,
+          },
+        },
+        {
+          returnDocument:
+            "after",
+        },
+      );
+
+    if (order) {
+      await Product.updateOne(
+        {
+          productId:
+            order.productId,
+        },
+        {
+          $inc: {
+            stock:
+              order.quantity,
+          },
+        },
+      );
+    }
+
     return payment;
   },
 
@@ -517,17 +561,10 @@ export const paymentService = {
       const discordClient =
         getMarketplaceDiscordClient();
 
-      const sellerDmSent =
-        await sendSellerOrderPaidDM(
-          discordClient,
-          updated.orderId,
-        );
-
-      if (!sellerDmSent) {
-        console.warn(
-          `⚠️ Seller DM was not sent: Order ${updated.orderId}`,
-        );
-      }
+      await sendSellerOrderPaidDM(
+        discordClient,
+        updated.orderId,
+      );
     } catch (error) {
       console.error(
         `⚠️ Failed to send seller paid DM for Order ${updated.orderId}:`,

@@ -1,6 +1,7 @@
 import { Order } from "../models/Order.js";
 import { Product } from "../models/Product.js";
 import { Shop } from "../models/Shop.js";
+import { isShopOpenAt } from "./shopHoursService.js";
 
 function createOrderId(): string {
   return (
@@ -39,16 +40,35 @@ async function releaseStock(
   productId: string,
   quantity: number,
 ): Promise<void> {
-  await Product.updateOne(
-    {
-      productId,
-    },
-    {
-      $inc: {
-        stock: quantity,
+  if (quantity <= 0) {
+    throw new Error(
+      "จำนวน Stock ที่ต้องคืนต้องมากกว่า 0",
+    );
+  }
+
+  const result =
+    await Product.updateOne(
+      {
+        productId,
       },
-    },
-  );
+      {
+        $inc: {
+          stock: quantity,
+        },
+      },
+    );
+
+  if (result.matchedCount !== 1) {
+    throw new Error(
+      `ไม่พบ Product สำหรับคืน Stock: ${productId}`,
+    );
+  }
+
+  if (result.modifiedCount !== 1) {
+    throw new Error(
+      `ไม่สามารถคืน Stock ของ Product: ${productId}`,
+    );
+  }
 }
 
 export const orderService = {
@@ -116,6 +136,89 @@ export const orderService = {
       );
     }
 
+    /*
+     * ตรวจสอบร้านก่อนสร้าง Order
+     */
+    const shop =
+      await Shop.findOne({
+        shopId:
+          data.shopId,
+      });
+
+    if (!shop) {
+      throw new Error(
+        "ไม่พบร้านค้า",
+      );
+    }
+
+    if (
+      shop.status !==
+      "verified"
+    ) {
+      throw new Error(
+        "ร้านค้านี้ยังไม่พร้อมให้บริการ",
+      );
+    }
+
+    /*
+     * ตรวจสอบเวลาทำการของร้าน
+     *
+     * ใช้เวลาปัจจุบันตาม timezone
+     * ที่เจ้าของร้านตั้งไว้
+     */
+    const shopStatus =
+      isShopOpenAt(shop);
+
+    if (!shopStatus.open) {
+      throw new Error(
+        `ร้านค้าปิดอยู่ในขณะนี้\n${shopStatus.reason}`,
+      );
+    }
+
+    /*
+     * ตรวจสอบสินค้าอีกครั้งที่ backend
+     * ป้องกัน client ส่ง product/shop/seller
+     * ที่ไม่ตรงกัน
+     */
+    const product =
+      await Product.findOne({
+        productId:
+          data.productId,
+        shopId:
+          data.shopId,
+        ownerId:
+          data.sellerId,
+        active: true,
+      });
+
+    if (!product) {
+      throw new Error(
+        "ไม่พบสินค้านี้ หรือสินค้าไม่ได้เปิดขาย",
+      );
+    }
+
+    if (
+      product.stock <
+      data.quantity
+    ) {
+      throw new Error(
+        "สินค้าเหลือไม่เพียงพอ",
+      );
+    }
+
+    /*
+     * ใช้ราคาจริงจาก Database
+     * ไม่เชื่อราคาที่ส่งมาจาก client
+     */
+    if (
+      product.price !==
+      data.unitPrice
+    ) {
+      throw new Error(
+        "ราคาสินค้ามีการเปลี่ยนแปลง กรุณาเปิดหน้าสินค้าใหม่แล้วลองอีกครั้ง",
+      );
+    }
+
     const reserved =
       await reserveStock(
         data.productId,
@@ -136,29 +239,32 @@ export const orderService = {
       const order =
         new Order({
           orderId: createOrderId(),
-          buyerId: data.buyerId,
-          sellerId: data.sellerId,
-          shopId: data.shopId,
-          productId: data.productId,
+          buyerId:
+            data.buyerId,
+          sellerId:
+            data.sellerId,
+          shopId:
+            data.shopId,
+          productId:
+            data.productId,
           productName:
-            data.productName,
-          quantity: data.quantity,
+            product.name,
+          quantity:
+            data.quantity,
           unitPrice:
-            data.unitPrice,
+            product.price,
           totalAmount,
           status: "pending",
-          paymentMethod: "none",
+          paymentMethod:
+            "none",
           metadata: {
-            stockReserved: true,
+            stockReserved:
+              true,
           },
         });
 
       await order.save();
 
-      /*
-       * Order ถูกสร้างสำเร็จแล้ว
-       * เพิ่ม totalOrders เพียงครั้งเดียว
-       */
       await Shop.findOneAndUpdate(
         {
           shopId:
@@ -197,7 +303,8 @@ export const orderService = {
       await Order.findOneAndUpdate(
         {
           orderId,
-          status: "pending",
+          status:
+            "pending",
         },
         {
           $set: {
@@ -238,11 +345,13 @@ export const orderService = {
         {
           $set: {
             status: "paid",
-            paidAt: new Date(),
+            paidAt:
+              new Date(),
           },
         },
         {
-          returnDocument: "after",
+          returnDocument:
+            "after",
         },
       );
 
@@ -278,13 +387,15 @@ export const orderService = {
         },
         {
           $set: {
-            status: "processing",
+            status:
+              "processing",
             processingAt:
               new Date(),
           },
         },
         {
-          returnDocument: "after",
+          returnDocument:
+            "after",
         },
       );
 
@@ -301,13 +412,6 @@ export const orderService = {
     orderId: string,
     deliveryData: unknown = {},
   ) {
-    /*
-     * เปลี่ยนสถานะเป็น completed แบบ atomic
-     *
-     * เพราะ query รับเฉพาะ paid / processing
-     * การกด Complete ซ้ำจะไม่ผ่าน query นี้
-     * และจะไม่เพิ่ม completedOrders ซ้ำ
-     */
     const order =
       await Order.findOneAndUpdate(
         {
@@ -328,7 +432,8 @@ export const orderService = {
           },
         },
         {
-          returnDocument: "after",
+          returnDocument:
+            "after",
         },
       );
 
@@ -350,10 +455,6 @@ export const orderService = {
       );
     }
 
-    /*
-     * Order เพิ่งเปลี่ยนเป็น completed สำเร็จ
-     * เพิ่ม completedOrders เพียงครั้งเดียว
-     */
     const shop =
       await Shop.findOneAndUpdate(
         {
@@ -413,7 +514,8 @@ export const orderService = {
           },
         },
         {
-          returnDocument: "after",
+          returnDocument:
+            "after",
         },
       );
 
@@ -471,7 +573,8 @@ export const orderService = {
           },
         },
         {
-          returnDocument: "after",
+          returnDocument:
+            "after",
         },
       );
 
@@ -515,7 +618,8 @@ export const orderService = {
           },
         },
         {
-          returnDocument: "after",
+          returnDocument:
+            "after",
         },
       );
 

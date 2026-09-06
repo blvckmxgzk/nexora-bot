@@ -10,7 +10,7 @@ import { Product } from "../../models/Product.js";
 import { Shop } from "../../models/Shop.js";
 
 export const customId =
-  "nexora_product_edit:";
+  "nexora_product_stock:";
 
 export async function execute(
   interaction: ButtonInteraction,
@@ -39,18 +39,6 @@ export async function execute(
     return;
   }
 
-  if (
-    shop.status === "closed" ||
-    shop.status === "suspended"
-  ) {
-    await interaction.reply({
-      content:
-        "❌ ร้านค้านี้ไม่สามารถแก้ไขสินค้าได้",
-      ephemeral: true,
-    });
-    return;
-  }
-
   const product =
     await Product.findOne({
       productId,
@@ -70,56 +58,26 @@ export async function execute(
   const modal =
     new ModalBuilder()
       .setCustomId(
-        `nexora_product_edit_modal:${product.productId}`,
+        `nexora_product_stock_modal:${product.productId}`,
       )
-      .setTitle("✏️ แก้ไขสินค้า");
+      .setTitle("📦 จัดการ Stock");
 
-  const name =
+  const stock =
     new TextInputBuilder()
-      .setCustomId("name")
+      .setCustomId("stock")
       .setStyle(TextInputStyle.Short)
-      .setValue(product.name)
-      .setMaxLength(100)
-      .setRequired(true);
-
-  const description =
-    new TextInputBuilder()
-      .setCustomId("description")
-      .setStyle(TextInputStyle.Paragraph)
       .setValue(
-        product.description ?? "",
+        String(product.stock),
       )
-      .setMaxLength(1000)
-      .setRequired(false);
-
-  const price =
-    new TextInputBuilder()
-      .setCustomId("price")
-      .setStyle(TextInputStyle.Short)
-      .setValue(String(product.price))
+      .setPlaceholder(
+        "ใส่จำนวน Stock ใหม่",
+      )
       .setMaxLength(20)
-      .setRequired(true);
-
-  const category =
-    new TextInputBuilder()
-      .setCustomId("category")
-      .setStyle(TextInputStyle.Short)
-      .setValue(product.category)
-      .setMaxLength(30)
       .setRequired(true);
 
   modal.addComponents(
     new ActionRowBuilder<TextInputBuilder>()
-      .addComponents(name),
-
-    new ActionRowBuilder<TextInputBuilder>()
-      .addComponents(description),
-
-    new ActionRowBuilder<TextInputBuilder>()
-      .addComponents(price),
-
-    new ActionRowBuilder<TextInputBuilder>()
-      .addComponents(category),
+      .addComponents(stock),
   );
 
   await interaction.showModal(modal);

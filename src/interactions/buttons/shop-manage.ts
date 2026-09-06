@@ -9,6 +9,7 @@ import {
 import { Shop } from "../../models/Shop.js";
 import { Order } from "../../models/Order.js";
 import { paymentAccountService } from "../../services/paymentAccountService.js";
+import { isShopOpenAt } from "../../services/shopHoursService.js";
 
 export const customId =
   "nexora_shop_manage";
@@ -28,6 +29,7 @@ export async function execute(
         "❌ คุณยังไม่มีร้านค้า",
       ephemeral: true,
     });
+
     return;
   }
 
@@ -41,6 +43,9 @@ export async function execute(
     await paymentAccountService.getByShopId(
       shop.shopId,
     );
+
+  const shopStatus =
+    isShopOpenAt(shop);
 
   const statusNames: Record<
     string,
@@ -82,11 +87,25 @@ export async function execute(
       .join("\n") ||
     "❌ ยังไม่ได้ตั้งค่า";
 
+  const businessHoursText =
+    shopStatus.schedule
+      ? [
+          shopStatus.open
+            ? "🟢 ร้านเปิดอยู่"
+            : "🔴 ร้านปิดอยู่",
+
+          `วันนี้: ${shopStatus.schedule.open} - ${shopStatus.schedule.close}`,
+
+          `Timezone: ${shop.timezone ?? "Asia/Bangkok"}`,
+        ].join("\n")
+      : "🔴 วันนี้ร้านปิด";
+
   const embed =
     new EmbedBuilder()
       .setColor(
         shop.status ===
-          "verified"
+          "verified" &&
+        shopStatus.open
           ? 0x22c55e
           : 0x8b5cf6,
       )
@@ -97,7 +116,7 @@ export async function execute(
         [
           `**Shop ID:** \`${shop.shopId}\``,
           "",
-          `**สถานะ:** ${
+          `**สถานะร้าน:** ${
             statusNames[
               shop.status
             ] ??
@@ -108,6 +127,9 @@ export async function execute(
           `**คำสั่งซื้อ:** ${orders}`,
           `**คะแนน:** ⭐ ${shop.rating.toFixed(1)} (${shop.reviewCount} รีวิว)`,
           `**คำสั่งซื้อสำเร็จ:** ${shop.completedOrders}`,
+          "",
+          "**🕐 เวลาทำการ**",
+          businessHoursText,
           "",
           "**💳 ช่องทางรับเงิน**",
           paymentText,
@@ -156,6 +178,22 @@ export async function execute(
           .setEmoji("💳")
           .setStyle(
             ButtonStyle.Secondary,
+          ),
+      );
+
+  const settingsRow =
+    new ActionRowBuilder<ButtonBuilder>()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId(
+            "nexora_shop_hours",
+          )
+          .setLabel(
+            "เวลาทำการ",
+          )
+          .setEmoji("🕐")
+          .setStyle(
+            ButtonStyle.Primary,
           ),
       );
 
@@ -240,7 +278,10 @@ export async function execute(
   );
 
   const components =
-    [mainRow];
+    [
+      mainRow,
+      settingsRow,
+    ];
 
   if (
     actionRow.components.length >
@@ -252,7 +293,9 @@ export async function execute(
   }
 
   await interaction.reply({
-    embeds: [embed],
+    embeds: [
+      embed,
+    ],
     components,
     ephemeral: true,
   });
