@@ -17,6 +17,7 @@ function createOrderId(): string {
 async function reserveStock(
   productId: string,
   quantity: number,
+  session?: mongoose.ClientSession,
 ): Promise<boolean> {
   const result =
     await Product.updateOne(
@@ -32,6 +33,9 @@ async function reserveStock(
           stock: -quantity,
         },
       },
+      {
+        session,
+      },
     );
 
   return result.modifiedCount === 1;
@@ -40,6 +44,7 @@ async function reserveStock(
 async function releaseStock(
   productId: string,
   quantity: number,
+  session?: mongoose.ClientSession,
 ): Promise<void> {
   if (quantity <= 0) {
     throw new Error(
@@ -56,6 +61,9 @@ async function releaseStock(
         $inc: {
           stock: quantity,
         },
+      },
+      {
+        session,
       },
     );
 
@@ -137,159 +145,198 @@ export const orderService = {
       );
     }
 
-    /*
-     * ตรวจสอบร้านก่อนสร้าง Order
-     */
-    const shop =
-      await Shop.findOne({
-        shopId:
-          data.shopId,
-      });
+    const session =
+      await mongoose.startSession();
 
-    if (!shop) {
-      throw new Error(
-        "ไม่พบร้านค้า",
-      );
-    }
+    const orderId =
+      createOrderId();
 
-    if (
-      shop.status !==
-      "verified"
-    ) {
-      throw new Error(
-        "ร้านค้านี้ยังไม่พร้อมให้บริการ",
-      );
-    }
-
-    /*
-     * ตรวจสอบเวลาทำการของร้าน
-     *
-     * ใช้เวลาปัจจุบันตาม timezone
-     * ที่เจ้าของร้านตั้งไว้
-     */
-    const shopStatus =
-      isShopOpenAt(shop);
-
-    if (!shopStatus.open) {
-      throw new Error(
-        `ร้านค้าปิดอยู่ในขณะนี้\n${shopStatus.reason}`,
-      );
-    }
-
-    /*
-     * ตรวจสอบสินค้าอีกครั้งที่ backend
-     * ป้องกัน client ส่ง product/shop/seller
-     * ที่ไม่ตรงกัน
-     */
-    const product =
-      await Product.findOne({
-        productId:
-          data.productId,
-        shopId:
-          data.shopId,
-        ownerId:
-          data.sellerId,
-        active: true,
-      });
-
-    if (!product) {
-      throw new Error(
-        "ไม่พบสินค้านี้ หรือสินค้าไม่ได้เปิดขาย",
-      );
-    }
-
-    if (
-      product.stock <
-      data.quantity
-    ) {
-      throw new Error(
-        "สินค้าเหลือไม่เพียงพอ",
-      );
-    }
-
-    /*
-     * ใช้ราคาจริงจาก Database
-     * ไม่เชื่อราคาที่ส่งมาจาก client
-     */
-    if (
-      product.price !==
-      data.unitPrice
-    ) {
-      throw new Error(
-        "ราคาสินค้ามีการเปลี่ยนแปลง กรุณาเปิดหน้าสินค้าใหม่แล้วลองอีกครั้ง",
-      );
-    }
-
-    const reserved =
-      await reserveStock(
-        data.productId,
-        data.quantity,
-      );
-
-    if (!reserved) {
-      throw new Error(
-        "สินค้าเหลือไม่เพียงพอ หรือสินค้าถูกปิดการขายแล้ว",
-      );
-    }
-
-    const totalAmount =
-      data.unitPrice *
-      data.quantity;
+    let createdOrder: any = null;
 
     try {
-      const order =
-        new Order({
-          orderId: createOrderId(),
-          buyerId:
-            data.buyerId,
-          sellerId:
-            data.sellerId,
-          shopId:
-            data.shopId,
-          productId:
-            data.productId,
-          productName:
-            product.name,
-          quantity:
-            data.quantity,
-          unitPrice:
-            product.price,
-          totalAmount,
-          status: "pending",
-          paymentMethod:
-            "none",
-          metadata: {
-            stockReserved:
-              true,
-          },
-        });
+      await session.withTransaction(
+        async () => {
+          /*
+           * ตรวจสอบร้านภายใน transaction
+           */
+          const shop =
+            await Shop.findOne({
+              shopId:
+                data.shopId,
+            }).session(session);
 
-      await order.save();
+          if (!shop) {
+            throw new Error(
+              "ไม่พบร้านค้า",
+            );
+          }
 
-      await Shop.findOneAndUpdate(
-        {
-          shopId:
-            data.shopId,
+          if (
+            shop.status !==
+            "verified"
+          ) {
+            throw new Error(
+              "ร้านค้านี้ยังไม่พร้อมให้บริการ",
+            );
+          }
+
+          /*
+           * ตรวจสอบเวลาทำการของร้าน
+           */
+          const shopStatus =
+            isShopOpenAt(shop);
+
+          if (!shopStatus.open) {
+            throw new Error(
+              `ร้านค้าปิดอยู่ในขณะนี้\n${shopStatus.reason}`,
+            );
+          }
+
+          /*
+           * ตรวจสอบสินค้าอีกครั้งจาก Database
+           */
+          const product =
+            await Product.findOne({
+              productId:
+                data.productId,
+              shopId:
+                data.shopId,
+              ownerId:
+                data.sellerId,
+              active: true,
+            }).session(session);
+
+          if (!product) {
+            throw new Error(
+              "ไม่พบสินค้านี้ หรือสินค้าไม่ได้เปิดขาย",
+            );
+          }
+
+          /*
+           * ใช้ราคาจริงจาก Database
+           */
+          if (
+            product.price !==
+            data.unitPrice
+          ) {
+            throw new Error(
+              "ราคาสินค้ามีการเปลี่ยนแปลง กรุณาเปิดหน้าสินค้าใหม่แล้วลองอีกครั้ง",
+            );
+          }
+
+          /*
+           * ตรวจสอบ Stock แบบ atomic
+           *
+           * การเช็ก stock ด้วย product.stock
+           * เพียงอย่างเดียวไม่เพียงพอเมื่อมี
+           * ผู้ซื้อหลายคนพร้อมกัน
+           */
+          const reserved =
+            await reserveStock(
+              data.productId,
+              data.quantity,
+              session,
+            );
+
+          if (!reserved) {
+            throw new Error(
+              "สินค้าเหลือไม่เพียงพอ หรือสินค้าถูกปิดการขายแล้ว",
+            );
+          }
+
+          const totalAmount =
+            product.price *
+            data.quantity;
+
+          if (
+            !Number.isFinite(
+              totalAmount,
+            ) ||
+            totalAmount < 0
+          ) {
+            throw new Error(
+              "ไม่สามารถคำนวณราคารวมของคำสั่งซื้อได้",
+            );
+          }
+
+          const order =
+            new Order({
+              orderId,
+              buyerId:
+                data.buyerId,
+              sellerId:
+                data.sellerId,
+              shopId:
+                data.shopId,
+              productId:
+                data.productId,
+              productName:
+                product.name,
+              quantity:
+                data.quantity,
+              unitPrice:
+                product.price,
+              totalAmount,
+              status: "pending",
+              paymentMethod:
+                "none",
+              metadata: {
+                stockReserved:
+                  true,
+                stockReleased:
+                  false,
+              },
+            });
+
+          await order.save({
+            session,
+          });
+
+          /*
+           * เพิ่มยอด Order ของร้าน
+           * ใน transaction เดียวกับ Order
+           */
+          const updatedShop =
+            await Shop.findOneAndUpdate(
+              {
+                shopId:
+                  data.shopId,
+              },
+              {
+                $inc: {
+                  totalOrders: 1,
+                },
+              },
+              {
+                new: true,
+                session,
+              },
+            );
+
+          if (!updatedShop) {
+            throw new Error(
+              "ไม่พบร้านค้าสำหรับอัปเดตจำนวนคำสั่งซื้อ",
+            );
+          }
+
+          createdOrder =
+            order;
+
+          console.log(
+            `🧾 Order created: ${order.orderId} → Shop ${data.shopId} totalOrders +1`,
+          );
         },
-        {
-          $inc: {
-            totalOrders: 1,
-          },
-        },
       );
 
-      console.log(
-        `🧾 Order created: ${order.orderId} → Shop ${data.shopId} totalOrders +1`,
-      );
+      if (!createdOrder) {
+        throw new Error(
+          "ไม่สามารถสร้างคำสั่งซื้อได้",
+        );
+      }
 
-      return order;
-    } catch (error) {
-      await releaseStock(
-        data.productId,
-        data.quantity,
-      );
-
-      throw error;
+      return createdOrder;
+    } finally {
+      await session.endSession();
     }
   },
 
@@ -411,217 +458,314 @@ export const orderService = {
 
   async markCompleted(
     orderId: string,
-    deliveryData: unknown = {},
   ) {
-    const order =
-      await Order.findOneAndUpdate(
-        {
-          orderId,
-          status: {
-            $in: [
-              "processing",
-              "paid",
-            ],
-          },
-        },
-        {
-          $set: {
-            status: "completed",
-            completedAt:
-              new Date(),
-            deliveryData,
-          },
-        },
-        {
-          returnDocument:
-            "after",
+    const session =
+      await mongoose.startSession();
+
+    let completedOrder: any = null;
+
+    try {
+      await session.withTransaction(
+        async () => {
+          /*
+           * เปลี่ยน Order เป็น completed
+           * และเพิ่ม completedOrders ของร้าน
+           * ภายใน transaction เดียวกัน
+           */
+          const order =
+            await Order.findOneAndUpdate(
+              {
+                orderId,
+                status: {
+                  $in: [
+                    "processing",
+                    "paid",
+                  ],
+                },
+              },
+              {
+                $set: {
+                  status:
+                    "completed",
+                  completedAt:
+                    new Date(),
+                },
+              },
+              {
+                new: true,
+                session,
+              },
+            );
+
+          if (!order) {
+            const existing =
+              await Order.findOne({
+                orderId,
+              }).session(session);
+
+            if (
+              existing?.status ===
+              "completed"
+            ) {
+              completedOrder =
+                existing;
+              return;
+            }
+
+            throw new Error(
+              "คำสั่งซื้อนี้ไม่สามารถทำให้สำเร็จได้",
+            );
+          }
+
+          const shop =
+            await Shop.findOneAndUpdate(
+              {
+                shopId:
+                  order.shopId,
+              },
+              {
+                $inc: {
+                  completedOrders: 1,
+                },
+              },
+              {
+                new: true,
+                session,
+              },
+            );
+
+          if (!shop) {
+            throw new Error(
+              "ไม่พบร้านค้าของคำสั่งซื้อ",
+            );
+          }
+
+          completedOrder =
+            order;
+
+          console.log(
+            `✅ Order completed: ${order.orderId} → Shop ${order.shopId} completedOrders = ${shop.completedOrders}`,
+          );
         },
       );
 
-    if (!order) {
-      const existing =
-        await Order.findOne({
-          orderId,
-        });
-
-      if (
-        existing?.status ===
-        "completed"
-      ) {
-        return existing;
+      if (!completedOrder) {
+        throw new Error(
+          "ไม่สามารถทำคำสั่งซื้อให้เสร็จสิ้นได้",
+        );
       }
 
-      throw new Error(
-        "คำสั่งซื้อนี้ไม่สามารถทำให้สำเร็จได้",
-      );
+      return completedOrder;
+    } finally {
+      await session.endSession();
     }
-
-    const shop =
-      await Shop.findOneAndUpdate(
-        {
-          shopId:
-            order.shopId,
-        },
-        {
-          $inc: {
-            completedOrders: 1,
-          },
-        },
-        {
-          returnDocument:
-            "after",
-        },
-      );
-
-    if (!shop) {
-      throw new Error(
-        "ไม่พบร้านค้าของคำสั่งซื้อ",
-      );
-    }
-
-    console.log(
-      `✅ Order completed: ${order.orderId} → Shop ${order.shopId} completedOrders = ${shop.completedOrders}`,
-    );
-
-    return order;
   },
 
   async cancelOrder(
     orderId: string,
     reason?: string,
   ) {
-    const order = await Order.findOne({
-      orderId,
-    });
-
-    if (!order) {
-      throw new Error("ไม่พบคำสั่งซื้อ");
-    }
-
-    if (
-      order.status !== "pending" &&
-      order.status !== "awaiting_payment"
-    ) {
-      throw new Error(
-        `ไม่สามารถยกเลิกคำสั่งซื้อสถานะ ${order.status} ได้`,
-      );
-    }
-
-    const stockReserved =
-      order.metadata?.stockReserved === true;
-
-    // Stock has already been released.
-    // Only cancel the order without touching Product.stock.
-    if (!stockReserved) {
-      const updated = await Order.findOneAndUpdate(
-        {
-          orderId,
-          status: {
-            $in: [
-              "pending",
-              "awaiting_payment",
-            ],
-          },
-        },
-        {
-          $set: {
-            status: "cancelled",
-            cancelledAt: new Date(),
-            cancelReason: reason ?? null,
-            "metadata.stockReserved": false,
-            "metadata.stockReleased": true,
-          },
-        },
-        {
-          new: true,
-        },
-      );
-
-      if (!updated) {
-        const current = await Order.findOne({
-          orderId,
-        });
-
-        if (!current) {
-          throw new Error("ไม่พบคำสั่งซื้อ");
-        }
-
-        return current;
-      }
-
-      return updated;
-    }
-
-    // Atomically claim the stock-release operation.
-    // Only one concurrent request can pass this condition.
-    const updated = await Order.findOneAndUpdate(
-      {
-        orderId,
-        status: {
-          $in: [
-            "pending",
-            "awaiting_payment",
-          ],
-        },
-        "metadata.stockReserved": true,
-        "metadata.stockReleased": {
-          $ne: true,
-        },
-      },
-      {
-        $set: {
-          status: "cancelled",
-          cancelledAt: new Date(),
-          cancelReason: reason ?? null,
-          "metadata.stockReserved": false,
-          "metadata.stockReleased": true,
-        },
-      },
-      {
-        new: true,
-      },
-    );
-
-    if (!updated) {
-      const current = await Order.findOne({
-        orderId,
-      });
-
-      if (!current) {
-        throw new Error("ไม่พบคำสั่งซื้อ");
-      }
-
-      // Another request already cancelled/released this order.
-      return current;
-    }
+    const session =
+      await mongoose.startSession();
 
     try {
-      await releaseStock(
-        updated.productId,
-        updated.quantity,
-      );
-    } catch (error) {
-      console.error(
-        `[OrderService] Failed to release stock for ${orderId}:`,
-        error,
+      let cancelledOrder: any =
+        null;
+
+      await session.withTransaction(
+        async () => {
+          const current =
+            await Order.findOne({
+              orderId,
+            }).session(session);
+
+          if (!current) {
+            throw new Error(
+              "ไม่พบคำสั่งซื้อ",
+            );
+          }
+
+          if (
+            current.status ===
+              "cancelled" &&
+            current.metadata
+              ?.stockReleased ===
+              true
+          ) {
+            cancelledOrder =
+              current;
+            return;
+          }
+
+          if (
+            current.status !==
+              "pending" &&
+            current.status !==
+              "awaiting_payment"
+          ) {
+            throw new Error(
+              `ไม่สามารถยกเลิกคำสั่งซื้อสถานะ ${current.status} ได้`,
+            );
+          }
+
+          const stockReserved =
+            current.metadata
+              ?.stockReserved ===
+            true;
+
+          /*
+           * กรณี Stock ถูกคืนไปแล้ว
+           * ไม่ต้องคืนซ้ำ
+           */
+          if (!stockReserved) {
+            const updated =
+              await Order.findOneAndUpdate(
+                {
+                  orderId,
+                  status: {
+                    $in: [
+                      "pending",
+                      "awaiting_payment",
+                    ],
+                  },
+                },
+                {
+                  $set: {
+                    status:
+                      "cancelled",
+                    cancelledAt:
+                      new Date(),
+                    cancelReason:
+                      reason?.trim() ||
+                      null,
+                    "metadata.stockReserved":
+                      false,
+                    "metadata.stockReleased":
+                      true,
+                  },
+                },
+                {
+                  new: true,
+                  session,
+                },
+              );
+
+            if (!updated) {
+              const latest =
+                await Order.findOne({
+                  orderId,
+                }).session(session);
+
+              if (
+                latest?.status ===
+                  "cancelled" &&
+                latest.metadata
+                  ?.stockReleased ===
+                  true
+              ) {
+                cancelledOrder =
+                  latest;
+                return;
+              }
+
+              throw new Error(
+                "ไม่สามารถยกเลิกคำสั่งซื้อได้",
+              );
+            }
+
+            cancelledOrder =
+              updated;
+            return;
+          }
+
+          /*
+           * Stock ยังถูก reserve อยู่
+           *
+           * เปลี่ยน Order + คืน Stock
+           * ใน MongoDB transaction เดียวกัน
+           */
+          const updated =
+            await Order.findOneAndUpdate(
+              {
+                orderId,
+                status: {
+                  $in: [
+                    "pending",
+                    "awaiting_payment",
+                  ],
+                },
+                "metadata.stockReserved":
+                  true,
+                "metadata.stockReleased":
+                  {
+                    $ne: true,
+                  },
+              },
+              {
+                $set: {
+                  status:
+                    "cancelled",
+                  cancelledAt:
+                    new Date(),
+                  cancelReason:
+                    reason?.trim() ||
+                    null,
+                  "metadata.stockReserved":
+                    false,
+                  "metadata.stockReleased":
+                    true,
+                },
+              },
+              {
+                new: true,
+                session,
+              },
+            );
+
+          if (!updated) {
+            const latest =
+              await Order.findOne({
+                orderId,
+              }).session(session);
+
+            if (
+              latest?.status ===
+                "cancelled" &&
+              latest.metadata
+                ?.stockReleased ===
+                true
+            ) {
+              cancelledOrder =
+                latest;
+              return;
+            }
+
+            throw new Error(
+              "ไม่สามารถยกเลิกคำสั่งซื้อได้",
+            );
+          }
+
+          await releaseStock(
+            updated.productId,
+            updated.quantity,
+            session,
+          );
+
+          cancelledOrder =
+            updated;
+        },
       );
 
-      await Order.updateOne(
-        {
-          orderId,
-          status: "cancelled",
-        },
-        {
-          $set: {
-            "metadata.stockReleaseFailed": true,
-          },
-        },
-      );
+      if (!cancelledOrder) {
+        throw new Error(
+          "Cancel Order ไม่ได้ผลลัพธ์",
+        );
+      }
 
-      throw error;
+      return cancelledOrder;
+    } finally {
+      await session.endSession();
     }
-
-    return updated;
   },
 
   async expireOrder(
@@ -630,7 +774,8 @@ export const orderService = {
     const session =
       await mongoose.startSession();
 
-    let expiredOrder: any = null;
+    let expiredOrder: any =
+      null;
 
     try {
       await session.withTransaction(
@@ -646,7 +791,10 @@ export const orderService = {
             );
           }
 
-          // Idempotent: หมดอายุและคืน stock ไปแล้ว
+          /*
+           * Idempotent:
+           * หมดอายุและคืน Stock ไปแล้ว
+           */
           if (
             current.status ===
               "cancelled" &&
@@ -725,40 +873,11 @@ export const orderService = {
             );
           }
 
-          const stockResult =
-            await Product.updateOne(
-              {
-                productId:
-                  updated.productId,
-              },
-              {
-                $inc: {
-                  stock:
-                    updated.quantity,
-                },
-              },
-              {
-                session,
-              },
-            );
-
-          if (
-            stockResult.matchedCount !==
-            1
-          ) {
-            throw new Error(
-              `ไม่พบ Product สำหรับคืน Stock: ${updated.productId}`,
-            );
-          }
-
-          if (
-            stockResult.modifiedCount !==
-            1
-          ) {
-            throw new Error(
-              `ไม่สามารถคืน Stock ของ Product: ${updated.productId}`,
-            );
-          }
+          await releaseStock(
+            updated.productId,
+            updated.quantity,
+            session,
+          );
 
           expiredOrder =
             updated;
@@ -781,6 +900,59 @@ export const orderService = {
     orderId: string,
     reason: string,
   ) {
+    const trimmedReason =
+      reason.trim();
+
+    if (!trimmedReason) {
+      throw new Error(
+        "กรุณาระบุเหตุผลในการคืนเงิน",
+      );
+    }
+
+    if (
+      trimmedReason.length >
+      1000
+    ) {
+      throw new Error(
+        "เหตุผลในการคืนเงินต้องไม่เกิน 1000 ตัวอักษร",
+      );
+    }
+
+    const existing =
+      await Order.findOne({
+        orderId,
+      });
+
+    if (!existing) {
+      throw new Error(
+        "ไม่พบคำสั่งซื้อ",
+      );
+    }
+
+    /*
+     * Idempotent:
+     * ถ้าคืนเงินไปแล้ว ให้ส่ง Order เดิมกลับ
+     */
+    if (
+      existing.status ===
+      "refunded"
+    ) {
+      return existing;
+    }
+
+    if (
+      existing.status !==
+        "paid" &&
+      existing.status !==
+        "processing" &&
+      existing.status !==
+        "completed"
+    ) {
+      throw new Error(
+        "คำสั่งซื้อนี้ไม่สามารถคืนเงินได้",
+      );
+    }
+
     const order =
       await Order.findOneAndUpdate(
         {
@@ -795,11 +967,12 @@ export const orderService = {
         },
         {
           $set: {
-            status: "refunded",
+            status:
+              "refunded",
             refundedAt:
               new Date(),
             refundReason:
-              reason.trim(),
+              trimmedReason,
           },
         },
         {
@@ -809,6 +982,18 @@ export const orderService = {
       );
 
     if (!order) {
+      const latest =
+        await Order.findOne({
+          orderId,
+        });
+
+      if (
+        latest?.status ===
+        "refunded"
+      ) {
+        return latest;
+      }
+
       throw new Error(
         "คำสั่งซื้อนี้ไม่สามารถคืนเงินได้",
       );

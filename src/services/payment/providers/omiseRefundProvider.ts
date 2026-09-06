@@ -7,6 +7,9 @@ import type {
 const OMISE_API_URL =
   "https://api.omise.co";
 
+const REFUND_CURRENCY =
+  "THB";
+
 function getSecretKey(): string {
   const key =
     process.env.OMISE_SECRET_KEY;
@@ -20,59 +23,105 @@ function getSecretKey(): string {
   return key;
 }
 
+function createAuthHeader(): string {
+  const auth =
+    Buffer.from(
+      `${getSecretKey()}:`,
+    ).toString("base64");
+
+  return `Basic ${auth}`;
+}
+
+function getExpectedAmount(
+  amount: number,
+): number {
+  if (
+    !Number.isFinite(amount) ||
+    amount < 0
+  ) {
+    throw new Error(
+      "จำนวนเงิน Refund ไม่ถูกต้อง",
+    );
+  }
+
+  return Math.round(
+    amount * 100,
+  );
+}
+
+function normalizeCurrency(
+  currency: string | undefined,
+): string {
+  return (
+    currency ??
+    REFUND_CURRENCY
+  ).toUpperCase();
+}
+
 export const omiseRefundProvider:
   RefundProvider = {
-    async createRefund(
-      input: CreateRefundInput,
-    ): Promise<RefundCreationResult> {
-      const auth =
-        Buffer.from(
-          `${getSecretKey()}:`,
-        ).toString("base64");
-
-      const body =
-        new URLSearchParams();
-
-      body.set(
-        "amount",
-        String(
-          Math.round(
-            input.amount * 100,
-          ),
-        ),
+  async createRefund(
+    input: CreateRefundInput,
+  ): Promise<RefundCreationResult> {
+    const expectedAmount =
+      getExpectedAmount(
+        input.amount,
       );
 
-      body.set(
-        "metadata[order_id]",
-        input.orderId,
-      );
+    const body =
+      new URLSearchParams();
 
-      body.set(
-        "metadata[refund_id]",
-        input.refundId,
-      );
+    body.set(
+      "amount",
+      String(
+        expectedAmount,
+      ),
+    );
 
-      const response =
-        await fetch(
-          `${OMISE_API_URL}/charges/${encodeURIComponent(
-            input.providerPaymentId,
-          )}/refunds`,
-          {
-            method: "POST",
+    body.set(
+      "metadata[order_id]",
+      input.orderId,
+    );
 
-            headers: {
-              Authorization:
-                `Basic ${auth}`,
+    body.set(
+      "metadata[refund_id]",
+      input.refundId,
+    );
 
-              "Content-Type":
-                "application/x-www-form-urlencoded",
-            },
+    const response =
+      await fetch(
+        `${OMISE_API_URL}/charges/${encodeURIComponent(
+          input.providerPaymentId,
+        )}/refunds`,
+        {
+          method: "POST",
 
-            body,
+          headers: {
+            Authorization:
+              createAuthHeader(),
+
+            "Content-Type":
+              "application/x-www-form-urlencoded",
           },
-        );
 
-      const data =
+          body,
+        },
+      );
+
+    let data:
+      | {
+          id?: string;
+          status?: string;
+          amount?: number;
+          currency?: string;
+          voided?: boolean;
+          message?: string;
+          code?: string;
+        }
+      | null = null;
+
+    try {
+      data =
         (await response.json()) as {
           id?: string;
           status?: string;
@@ -82,64 +131,111 @@ export const omiseRefundProvider:
           message?: string;
           code?: string;
         };
+    } catch {
+      data = null;
+    }
 
-      if (
-        !response.ok ||
-        !data.id
-      ) {
-        throw new Error(
-          data.message ??
-            `Omise refund failed (${response.status})`,
-        );
-      }
+    if (
+      !response.ok ||
+      !data?.id
+    ) {
+      throw new Error(
+        data?.message ??
+          `Omise refund failed (${response.status})`,
+      );
+    }
 
-      return {
-        providerRefundId:
-          data.id,
+    const amount =
+      Number(
+        data.amount ?? 0,
+      ) / 100;
 
-        status:
-          data.status ??
-          "unknown",
+    const currency =
+      normalizeCurrency(
+        data.currency,
+      );
 
-        amount:
-          Number(
-            data.amount ?? 0,
-          ) / 100,
+    if (
+      Math.round(
+        amount * 100,
+      ) !== expectedAmount
+    ) {
+      throw new Error(
+        "จำนวนเงิน Refund ที่ได้รับจาก Omise ไม่ตรงกับจำนวนที่ร้องขอ",
+      );
+    }
 
-        currency:
-          data.currency ??
-          "THB",
+    if (
+      currency !==
+      REFUND_CURRENCY
+    ) {
+      throw new Error(
+        `Omise Refund ใช้ Currency ${currency} ซึ่งไม่รองรับ`,
+      );
+    }
 
-        voided:
-          Boolean(
-            data.voided,
-          ),
-      };
-    },
+    return {
+      providerRefundId:
+        data.id,
 
-    async findExistingRefund(
-      input: CreateRefundInput,
-    ): Promise<RefundCreationResult | null> {
-      const auth =
-        Buffer.from(
-          `${getSecretKey()}:`,
-        ).toString("base64");
+      status:
+        data.status ??
+        "unknown",
 
-      const response =
-        await fetch(
-          `${OMISE_API_URL}/charges/${encodeURIComponent(
-            input.providerPaymentId,
-          )}/refunds?order=reverse_chronological&limit=100`,
-          {
-            method: "GET",
-            headers: {
-              Authorization:
-                `Basic ${auth}`,
-            },
+      amount,
+
+      currency,
+
+      voided:
+        Boolean(
+          data.voided,
+        ),
+    };
+  },
+
+  async findExistingRefund(
+    input: CreateRefundInput,
+  ): Promise<RefundCreationResult | null> {
+    const expectedAmount =
+      getExpectedAmount(
+        input.amount,
+      );
+
+    const response =
+      await fetch(
+        `${OMISE_API_URL}/charges/${encodeURIComponent(
+          input.providerPaymentId,
+        )}/refunds?order=reverse_chronological&limit=100`,
+        {
+          method: "GET",
+
+          headers: {
+            Authorization:
+              createAuthHeader(),
           },
-        );
+        },
+      );
 
-      const data =
+    let data:
+      | {
+          object?: string;
+          data?: Array<{
+            id?: string;
+            status?: string;
+            amount?: number;
+            currency?: string;
+            voided?: boolean;
+            metadata?: Record<
+              string,
+              unknown
+            >;
+          }>;
+          message?: string;
+        }
+      | null = null;
+
+    try {
+      data =
         (await response.json()) as {
           object?: string;
           data?: Array<{
@@ -155,53 +251,87 @@ export const omiseRefundProvider:
           }>;
           message?: string;
         };
+    } catch {
+      data = null;
+    }
 
-      if (!response.ok) {
-        throw new Error(
-          data.message ??
-            `Omise refund lookup failed (${response.status})`,
-        );
-      }
+    if (!response.ok) {
+      throw new Error(
+        data?.message ??
+          `Omise refund lookup failed (${response.status})`,
+      );
+    }
 
-      const expectedAmount =
-        Math.round(
-          input.amount * 100,
-        );
+    const existing =
+      data?.data?.find(
+        (item) => {
+          if (
+            item.metadata
+              ?.refund_id !==
+            input.refundId
+          ) {
+            return false;
+          }
 
-      const existing =
-        data.data?.find(
-          (item) =>
-            item.metadata?.refund_id ===
-              input.refundId &&
-            Number(item.amount) ===
-              expectedAmount,
-        );
+          if (!item.id) {
+            return false;
+          }
 
-      if (!existing?.id) {
-        return null;
-      }
+          if (
+            Number(
+              item.amount,
+            ) !==
+            expectedAmount
+          ) {
+            return false;
+          }
 
-      return {
-        providerRefundId:
-          existing.id,
+          const currency =
+            normalizeCurrency(
+              item.currency,
+            );
 
-        status:
-          existing.status ??
-          "unknown",
+          if (
+            currency !==
+            REFUND_CURRENCY
+          ) {
+            return false;
+          }
 
-        amount:
-          Number(
-            existing.amount ?? 0,
-          ) / 100,
+          return true;
+        },
+      );
 
-        currency:
-          existing.currency ??
-          "THB",
+    if (!existing?.id) {
+      return null;
+    }
 
-        voided:
-          Boolean(
-            existing.voided,
-          ),
-      };
-    },
-  };
+    const amount =
+      Number(
+        existing.amount ?? 0,
+      ) / 100;
+
+    const currency =
+      normalizeCurrency(
+        existing.currency,
+      );
+
+    return {
+      providerRefundId:
+        existing.id,
+
+      status:
+        existing.status ??
+        "unknown",
+
+      amount,
+
+      currency,
+
+      voided:
+        Boolean(
+          existing.voided,
+        ),
+    };
+  },
+};
