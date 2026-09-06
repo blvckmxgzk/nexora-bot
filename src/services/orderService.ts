@@ -621,7 +621,7 @@ export const orderService = {
     }
 
     return updated;
-  }
+  },
 
   async expireOrder(
     orderId: string,

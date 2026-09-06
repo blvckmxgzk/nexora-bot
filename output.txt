@@ -2,4 +2,4 @@
 > nexora-bot@1.0.0 build
 > tsc
 
-src/services/orderService.ts(626,3): error TS1005: ',' expected.
+src/services/orderService.ts(491,14): error TS2304: Cannot find name 'OrderDocument'.

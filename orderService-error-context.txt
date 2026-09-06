@@ -1,0 +1,25 @@
+611:           status: "cancelled",
+612:         },
+613:         {
+614:           $set: {
+615:             "metadata.stockReleaseFailed": true,
+616:           },
+617:         },
+618:       );
+619: 
+620:       throw error;
+621:     }
+622: 
+623:     return updated;
+624:   }
+625: 
+626:   async expireOrder(
+627:     orderId: string,
+628:   ) {
+629:     const order =
+630:       await Order.findOneAndUpdate(
+631:         {
+632:           orderId,
+633:           status:
+634:             "awaiting_payment",
+635:           "metadata.stockReserved":
