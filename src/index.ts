@@ -24,8 +24,24 @@ import {
 } from "./services/payoutReconciliationWorker.js";
 
 import {
+  disputeReconciliationWorker,
+} from "./services/disputeReconciliationWorker.js";
+
+import {
+  marketplaceOpsMonitorWorker,
+} from "./services/marketplace/marketplaceOpsMonitorWorker.js";
+
+import {
+  notificationDeliveryWorker,
+} from "./services/marketplace/notificationDeliveryWorker.js";
+
+import {
   assertMarketplaceFinancialRuntimeSafety,
 } from "./services/marketplace/financialRuntimeSafety.js";
+
+import {
+  backfillSellerFinancialStates,
+} from "./services/marketplace/sellerFinancialStateBackfillService.js";
 
 import {
   createApiServer,
@@ -34,6 +50,15 @@ import {
 import {
   setMarketplaceDiscordClient,
 } from "./services/marketplace/marketplaceNotificationService.js";
+
+
+import {
+  setMinerDiscordClient,
+} from "./services/nexo/minerRareDropNotificationService.js";
+
+import {
+  minerSettlementWorker,
+} from "./services/nexo/minerSettlementWorker.js";
 
 const client = new Client({
   intents: [
@@ -75,6 +100,13 @@ async function bootstrap(): Promise<void> {
 
   await connectDatabase();
 
+  const financialBackfill =
+    await backfillSellerFinancialStates();
+
+  console.log(
+    `🧾 SellerFinancialState backfill: scanned=${financialBackfill.scanned} created=${financialBackfill.created} existing=${financialBackfill.existing}`,
+  );
+
   await commandHandler.loadCommands();
 
   await eventHandler.loadEvents(
@@ -85,12 +117,21 @@ async function bootstrap(): Promise<void> {
     client,
   );
 
+
+  setMinerDiscordClient(
+    client,
+  );
+
   await interactionHandler.loadInteractions(
     client,
   );
 
+  minerSettlementWorker.start();
   paymentExpirationWorker.start();
   payoutReconciliationWorker.start();
+  disputeReconciliationWorker.start();
+  notificationDeliveryWorker.start();
+  marketplaceOpsMonitorWorker.start();
 
   const apiServer =
     await createApiServer();
@@ -129,8 +170,18 @@ async function bootstrap(): Promise<void> {
     env.DISCORD_TOKEN,
   );
 
+  let shuttingDown =
+    false;
+
   const shutdown =
     async (signal: string) => {
+      if (shuttingDown) {
+        return;
+      }
+
+      shuttingDown =
+        true;
+
       console.log(
         `\n🛑 Received ${signal}`,
       );
@@ -144,8 +195,12 @@ async function bootstrap(): Promise<void> {
         );
       }
 
+      minerSettlementWorker.stop();
+      notificationDeliveryWorker.stop();
+      marketplaceOpsMonitorWorker.stop();
       paymentExpirationWorker.stop();
       payoutReconciliationWorker.stop();
+    disputeReconciliationWorker.stop();
 
       client.destroy();
 
@@ -154,14 +209,14 @@ async function bootstrap(): Promise<void> {
       process.exit(0);
     };
 
-  process.on(
+  process.once(
     "SIGINT",
     () => {
       void shutdown("SIGINT");
     },
   );
 
-  process.on(
+  process.once(
     "SIGTERM",
     () => {
       void shutdown("SIGTERM");

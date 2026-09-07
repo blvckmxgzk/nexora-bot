@@ -50,6 +50,7 @@ const webhookEventSchema =
           "payment",
           "payout",
           "recipient",
+          "dispute",
           "unknown",
         ],
 

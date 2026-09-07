@@ -1,0 +1,27 @@
+
+ RUN  v3.2.7 /workspaces/nexora-bot
+
+ ✓ tests/nexo-miner-engine.test.ts > NEXO Miner Engine > creates profile and starter pickaxe 44ms
+ ✓ tests/nexo-miner-engine.test.ts > NEXO Miner Engine > creates 100kg starter bag 34ms
+ ✓ tests/nexo-miner-engine.test.ts > NEXO Miner Engine > idle settlement mines ore 93ms
+ ✓ tests/nexo-miner-engine.test.ts > NEXO Miner Engine > mining increases overtime networth 33ms
+ ✓ tests/nexo-miner-engine.test.ts > NEXO Miner Engine > sell credits NEXO atomically 50ms
+ ✓ tests/nexo-miner-engine.test.ts > NEXO Miner Engine > power upgrade spends NEXO 37ms
+ ✓ tests/nexo-miner-engine.test.ts > NEXO Miner Engine > maxweight upgrade increases capacity 55ms
+ ✓ tests/nexo-miner-engine.test.ts > NEXO Miner Engine > legendary ore can move to chest without bag weight 55ms
+ ✓ tests/nexo-miner-engine.test.ts > NEXO Miner Engine > common ore cannot enter rare chest 36ms
+ ✓ tests/nexo-miner-engine.test.ts > NEXO Miner Engine > leaderboard uses overtime networth 22ms
+ ✓ tests/nexo-miner-foundation.test.ts > NEXO Miner Foundation > uses suffix formatting 3ms
+ ✓ tests/nexo-miner-foundation.test.ts > NEXO Miner Foundation > uses Alya-style multi-layer suffixes 1ms
+ ✓ tests/nexo-miner-foundation.test.ts > NEXO Miner Foundation > supports huge arithmetic 1ms
+ ✓ tests/nexo-miner-foundation.test.ts > NEXO Miner Foundation > has 24 rarities 1ms
+ ✓ tests/nexo-miner-foundation.test.ts > NEXO Miner Foundation > has 72 ores 0ms
+ ✓ tests/nexo-miner-foundation.test.ts > NEXO Miner Foundation > has large item catalog 0ms
+ ✓ tests/nexo-miner-foundation.test.ts > NEXO Miner Foundation > has one pickaxe tier per rarity 0ms
+ ✓ tests/nexo-miner-foundation.test.ts > NEXO Miner Foundation > catalog ids are unique 0ms
+
+ Test Files  2 passed (2)
+      Tests  18 passed (18)
+   Start at  13:46:58
+   Duration  3.60s (transform 357ms, setup 0ms, collect 1.23s, tests 1.80s, environment 0ms, prepare 231ms)
+

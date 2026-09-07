@@ -4,73 +4,87 @@ import {
   type InferSchemaType,
 } from "mongoose";
 
-const transactionSchema = new Schema(
-  {
-    transactionId: {
-      type: String,
-      required: true,
-      unique: true,
-      index: true,
-    },
+const transactionSchema =
+  new Schema(
+    {
+      transactionId: {
+        type: String,
+        required: true,
+        unique: true,
+        index: true,
+      },
 
-    discordId: {
-      type: String,
-      required: true,
-      index: true,
-    },
+      discordId: {
+        type: String,
+        required: true,
+        index: true,
+      },
 
-    type: {
-      type: String,
-      enum: [
-        "earn",
-        "spend",
-        "deposit",
-        "withdraw",
-        "transfer",
-        "purchase",
-        "refund",
-        "reward",
-      ],
-      required: true,
-    },
+      type: {
+        type: String,
 
-    amount: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
+        enum: [
+          "earn",
+          "spend",
+          "deposit",
+          "withdraw",
+          "transfer",
+          "purchase",
+          "refund",
+          "reward",
+          "adjustment",
+          "miner_sell",
+          "miner_upgrade",
+          "trade",
+        ],
 
-    balanceBefore: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
+        required: true,
+        index: true,
+      },
 
-    balanceAfter: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
+      amount: {
+        type: String,
+        required: true,
+      },
 
-    description: {
-      type: String,
-      default: "",
-      maxlength: 500,
-    },
+      balanceBefore: {
+        type: String,
+        required: true,
+      },
 
-    metadata: {
-      type: Schema.Types.Mixed,
-      default: {},
+      balanceAfter: {
+        type: String,
+        required: true,
+      },
+
+      description: {
+        type: String,
+        default: "",
+        maxlength: 500,
+      },
+
+      metadata: {
+        type:
+          Schema.Types.Mixed,
+
+        default: {},
+      },
     },
-  },
-  {
-    timestamps: true,
-    versionKey: false,
-  },
-);
+    {
+      timestamps: true,
+      versionKey: false,
+    },
+  );
+
+transactionSchema.index({
+  discordId: 1,
+  createdAt: -1,
+});
 
 export type TransactionDocument =
-  InferSchemaType<typeof transactionSchema>;
+  InferSchemaType<
+    typeof transactionSchema
+  >;
 
 export const Transaction =
   model<TransactionDocument>(

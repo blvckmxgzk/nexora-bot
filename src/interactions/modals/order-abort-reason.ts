@@ -7,12 +7,8 @@ import {
 } from "../../services/refundService.js";
 
 import {
-  sendSellerRefundRequestDM,
-} from "../../services/marketplace/sellerOrderNotificationService.js";
-
-import {
-  getMarketplaceDiscordClient,
-} from "../../services/marketplace/marketplaceNotificationService.js";
+  notificationDeliveryService,
+} from "../../services/marketplace/notificationDeliveryService.js";
 
 export const customId =
   "nexora_order_abort_reason:";
@@ -57,16 +53,17 @@ export async function execute(
       );
 
     try {
-      const client =
-        getMarketplaceDiscordClient();
+      await notificationDeliveryService
+        .enqueueAndAttempt({
+          eventType:
+            "refund_requested_seller",
 
-      await sendSellerRefundRequestDM(
-        client,
-        refund.refundId,
-      );
+          resourceId:
+            refund.refundId,
+        });
     } catch (notificationError) {
       console.error(
-        "⚠️ Failed to notify seller about refund:",
+        "⚠️ Failed to enqueue seller Refund notification:",
         notificationError,
       );
     }

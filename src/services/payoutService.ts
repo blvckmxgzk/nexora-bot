@@ -14,10 +14,23 @@ import {
 } from "./sellerLedgerService.js";
 
 import {
+  sellerFinancialRiskService,
+} from "./marketplace/sellerFinancialRiskService.js";
+
+import {
+  marketplaceRiskService,
+} from "./marketplace/marketplaceRiskService.js";
+
+import {
+  marketplaceRiskReviewService,
+} from "./marketplace/marketplaceRiskReviewService.js";
+
+import {
   payoutProviderRegistry,
 } from "./payment/payoutProviderRegistry.js";
 
 import type {
+  PayoutProvider,
   PayoutTransferSnapshot,
 } from "./payment/payoutProvider.js";
 
@@ -417,6 +430,79 @@ async function applyTransferState(
   return updated;
 }
 
+function shouldEnforceProviderLiquidityPreflight():
+  boolean {
+  /*
+   * Existing unit tests historically mock
+   * Transfer creation only.
+   *
+   * Production ALWAYS enforces preflight.
+   * Phase 5.8 tests explicitly enable it.
+   */
+  return (
+    process.env.NODE_ENV !==
+      "test" ||
+    process.env
+      .NEXORA_TEST_PROVIDER_LIQUIDITY_PREFLIGHT ===
+      "1"
+  );
+}
+
+async function assertProviderLiquidity(
+  payout:
+    any,
+
+  provider:
+    PayoutProvider,
+): Promise<void> {
+  const balance =
+    await provider
+      .retrieveBalance();
+
+  if (
+    balance.currency !==
+    "THB"
+  ) {
+    throw new Error(
+      `Provider balance currency ไม่รองรับ: ${balance.currency}`,
+    );
+  }
+
+  const checkedAt =
+    new Date();
+
+  await Payout.updateOne(
+    {
+      payoutId:
+        payout.payoutId,
+
+      status:
+        "reserved",
+    },
+    {
+      $set: {
+        "metadata.lastLiquidityCheckAt":
+          checkedAt,
+
+        "metadata.lastProviderTransferableSatang":
+          balance.transferableSatang,
+
+        "metadata.lastProviderTotalSatang":
+          balance.totalSatang,
+      },
+    },
+  );
+
+  if (
+    balance.transferableSatang <
+    payout.amountSatang
+  ) {
+    throw new Error(
+      `ยอดเงินที่ Omise พร้อม Transfer ไม่เพียงพอ: ต้องการ ${payout.amountSatang} satang แต่ transferable มี ${balance.transferableSatang} satang`,
+    );
+  }
+}
+
 async function recoverCreatingTransfer(
   payout:
     any,
@@ -455,6 +541,74 @@ async function recoverCreatingTransfer(
     payout.payoutId,
     recovered,
   );
+}
+
+async function claimPayoutForTransfer(
+  payout:
+    any,
+) {
+  const session =
+    await mongoose
+      .startSession();
+
+  let claimed:
+    any =
+      null;
+
+  try {
+    await session
+      .withTransaction(
+        async () => {
+          await sellerFinancialRiskService
+            .assertPayoutAllowed(
+              payout.sellerId,
+              payout.shopId,
+              session,
+            );
+
+          await marketplaceRiskReviewService
+            .assertPayoutTransferAllowed(
+              payout,
+              session,
+            );
+
+          claimed =
+            await Payout
+              .findOneAndUpdate(
+                {
+                  payoutId:
+                    payout.payoutId,
+
+                  status:
+                    "reserved",
+
+                  providerTransferId:
+                    null,
+                },
+                {
+                  $set: {
+                    status:
+                      "creating_transfer",
+
+                    "metadata.transferClaimedAt":
+                      new Date(),
+                  },
+                },
+                {
+                  new:
+                    true,
+
+                  session,
+                },
+              );
+        },
+      );
+  } finally {
+    await session
+      .endSession();
+  }
+
+  return claimed;
 }
 
 export const payoutService = {
@@ -504,6 +658,24 @@ export const payoutService = {
       );
     }
 
+    const riskDecision =
+      await marketplaceRiskService
+        .evaluatePayoutRequest({
+          sellerId:
+            data.sellerId,
+
+          shopId:
+            account.shopId,
+
+          amountSatang:
+            data.amountSatang,
+        });
+
+    marketplaceRiskService
+      .assertNotBlocked(
+        riskDecision,
+      );
+
     const payoutId =
       generatePayoutId();
 
@@ -551,6 +723,13 @@ export const payoutService = {
             );
           }
 
+          await sellerFinancialRiskService
+            .assertPayoutAllowed(
+              currentAccount.sellerId,
+              currentAccount.shopId,
+              session,
+            );
+
           const payout =
             new Payout({
               payoutId,
@@ -590,12 +769,85 @@ export const payoutService = {
               metadata: {
                 transferCreationLastError:
                   null,
+
+                riskEventId:
+                  riskDecision
+                    .riskEventId,
+
+                riskDecision:
+                  riskDecision
+                    .decision,
+
+                riskScore:
+                  riskDecision
+                    .score,
               },
             });
 
           await payout.save({
             session,
           });
+
+          if (
+            riskDecision
+              .decision ===
+            "review"
+          ) {
+            const review =
+              await marketplaceRiskReviewService
+                .createReview(
+                  {
+                    decision:
+                      riskDecision,
+
+                    resourceType:
+                      "payout",
+
+                    resourceId:
+                      payout.payoutId,
+
+                    subjectType:
+                      "seller",
+
+                    subjectId:
+                      payout.sellerId,
+
+                    sellerId:
+                      payout.sellerId,
+
+                    shopId:
+                      payout.shopId,
+
+                    metadata: {
+                      amountSatang:
+                        payout.amountSatang,
+                    },
+                  },
+
+                  session,
+                );
+
+            payout.metadata = {
+              ...(
+                payout.metadata ??
+                {}
+              ),
+
+              riskReviewId:
+                review.reviewId,
+
+              riskReviewStatus:
+                "pending",
+            };
+
+            payout.markModified(
+              "metadata",
+            );
+
+            await payout.save({
+              session,
+            });
+          }
 
           /*
            * FinancialState mutex +
@@ -768,28 +1020,33 @@ export const payoutService = {
       );
     }
 
+    await marketplaceRiskReviewService
+      .assertPayoutTransferAllowed(
+        payout,
+      );
+
+    /*
+     * Provider liquidity preflight ต้องเกิด
+     * ก่อน reserved -> creating_transfer
+     *
+     * หาก Balance API fail หรือ transferable
+     * ไม่พอ:
+     * - ห้าม claim
+     * - ห้าม create Transfer
+     * - Payout ต้องคง reserved
+     */
+    if (
+      shouldEnforceProviderLiquidityPreflight()
+    ) {
+      await assertProviderLiquidity(
+        payout,
+        provider,
+      );
+    }
+
     const claimed =
-      await Payout.findOneAndUpdate(
-        {
-          payoutId,
-          status:
-            "reserved",
-
-          providerTransferId:
-            null,
-        },
-        {
-          $set: {
-            status:
-              "creating_transfer",
-
-            "metadata.transferClaimedAt":
-              new Date(),
-          },
-        },
-        {
-          new: true,
-        },
+      await claimPayoutForTransfer(
+        payout,
       );
 
     if (!claimed) {
@@ -915,14 +1172,27 @@ export async function reconcileOpenPayouts(
 
   const payouts =
     await Payout.find({
-      status: {
-        $in: [
-          "reserved",
-          "creating_transfer",
-          "submitted",
-          "sent",
-        ],
-      },
+      $or: [
+        {
+          status:
+            "reserved",
+
+          "metadata.riskReviewStatus": {
+            $ne:
+              "pending",
+          },
+        },
+
+        {
+          status: {
+            $in: [
+              "creating_transfer",
+              "submitted",
+              "sent",
+            ],
+          },
+        },
+      ],
     })
       .sort({
         requestedAt: 1,

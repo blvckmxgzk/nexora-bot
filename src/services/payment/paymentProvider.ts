@@ -28,6 +28,34 @@ export interface PaymentCreationResult {
   expiresAt?: Date | null;
 }
 
+export interface PaymentAccountingSnapshot {
+  grossAmountSatang: number;
+
+  fundingAmountSatang: number;
+
+  providerFeeSatang: number;
+
+  providerFeeVatSatang: number;
+
+  /*
+   * fundingAmount - providerNet
+   *
+   * ใช้ field นี้แทนการสมมติว่า
+   * deduction มีแค่ fee + VAT เสมอ
+   */
+  providerDeductionsSatang: number;
+
+  providerNetSatang: number;
+
+  currency: string;
+
+  fundingCurrency: string;
+
+  providerTransactionId:
+    string |
+    null;
+}
+
 export interface PaymentVerificationResult {
   paid: boolean;
   providerPaymentId?: string | null;
@@ -36,6 +64,10 @@ export interface PaymentVerificationResult {
   currency?: string | null;
   status?: string | null;
   expiresAt?: Date | null;
+
+  accounting?:
+    PaymentAccountingSnapshot |
+    null;
 }
 
 export interface PaymentProvider {

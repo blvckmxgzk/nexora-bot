@@ -54,9 +54,6 @@ const refundSchema =
       providerRefundId: {
         type: String,
         default: null,
-        index: true,
-        unique: true,
-        sparse: true,
       },
 
       providerPaymentId: {
@@ -95,6 +92,47 @@ const refundSchema =
           "cancelled",
         ],
         default: "requested",
+        index: true,
+      },
+
+      riskEventId: {
+        type: String,
+        default: null,
+        index: true,
+      },
+
+      riskDecision: {
+        type: String,
+        enum: [
+          "allow",
+          "review",
+          "block",
+        ],
+        default: null,
+        index: true,
+      },
+
+      riskScore: {
+        type: Number,
+        default: null,
+        min: 0,
+        max: 100,
+      },
+
+      riskReviewId: {
+        type: String,
+        default: null,
+        index: true,
+      },
+
+      riskReviewStatus: {
+        type: String,
+        enum: [
+          "pending",
+          "approved",
+          "rejected",
+        ],
+        default: null,
         index: true,
       },
 
@@ -151,6 +189,31 @@ const refundSchema =
     },
   );
 
+
+refundSchema.index(
+  {
+    providerRefundId: 1,
+  },
+  {
+    unique: true,
+
+    name:
+      "uniq_provider_refund_id",
+
+    /*
+     * Null / missing Provider Refund IDs
+     * ไม่ควรถูกบังคับ unique
+     *
+     * uniqueness เริ่มเมื่อ Provider
+     * ส่ง string ID จริงกลับมาแล้วเท่านั้น
+     */
+    partialFilterExpression: {
+      providerRefundId: {
+        $type: "string",
+      },
+    },
+  },
+);
 
 refundSchema.index(
   {

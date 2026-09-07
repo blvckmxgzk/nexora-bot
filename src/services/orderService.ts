@@ -4,6 +4,9 @@ import { Product } from "../models/Product.js";
 import { Shop } from "../models/Shop.js";
 import { isShopOpenAt } from "./shopHoursService.js";
 import { sellerLedgerService } from "./sellerLedgerService.js";
+import {
+  marketplaceRiskService,
+} from "./marketplace/marketplaceRiskService.js";
 
 function createOrderId(): string {
   return (
@@ -146,11 +149,40 @@ export const orderService = {
       );
     }
 
-    const session =
-      await mongoose.startSession();
-
     const orderId =
       createOrderId();
+
+    const riskDecision =
+      await marketplaceRiskService
+        .evaluateOrderCreation({
+          orderId,
+
+          buyerId:
+            data.buyerId,
+
+          sellerId:
+            data.sellerId,
+
+          shopId:
+            data.shopId,
+
+          productId:
+            data.productId,
+
+          quantity:
+            data.quantity,
+
+          requestedUnitPrice:
+            data.unitPrice,
+        });
+
+    marketplaceRiskService
+      .assertNotBlocked(
+        riskDecision,
+      );
+
+    const session =
+      await mongoose.startSession();
 
     let createdOrder: any = null;
 
@@ -288,8 +320,21 @@ export const orderService = {
               metadata: {
                 stockReserved:
                   true,
+
                 stockReleased:
                   false,
+
+                riskEventId:
+                  riskDecision
+                    .riskEventId,
+
+                riskDecision:
+                  riskDecision
+                    .decision,
+
+                riskScore:
+                  riskDecision
+                    .score,
               },
             });
 

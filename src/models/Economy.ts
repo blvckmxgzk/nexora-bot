@@ -4,72 +4,84 @@ import {
   type InferSchemaType,
 } from "mongoose";
 
-const economySchema = new Schema(
-  {
-    discordId: {
-      type: String,
-      required: true,
-      unique: true,
-      index: true,
-    },
+const economySchema =
+  new Schema(
+    {
+      discordId: {
+        type: String,
+        required: true,
+        unique: true,
+        index: true,
+      },
 
-    balance: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
+      balance: {
+        type: String,
+        default: "0",
+        required: true,
+      },
 
-    bank: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
+      bank: {
+        type: String,
+        default: "0",
+        required: true,
+      },
 
-    lifetimeEarned: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
 
-    lifetimeSpent: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
+      reservedBalance: {
+        type: String,
+        default: "0",
+        required: true,
+      },
 
-    lastDailyAt: {
-      type: Date,
-      default: null,
-    },
+      lifetimeEarned: {
+        type: String,
+        default: "0",
+        required: true,
+      },
 
-    inventory: {
-      type: [
-        {
-          itemId: {
-            type: String,
-            required: true,
+      lifetimeSpent: {
+        type: String,
+        default: "0",
+        required: true,
+      },
+
+      lastDailyAt: {
+        type: Date,
+        default: null,
+      },
+
+      inventory: {
+        type: [
+          {
+            itemId: {
+              type: String,
+              required: true,
+            },
+
+            quantity: {
+              type: Number,
+              required: true,
+              min: 1,
+            },
           },
+        ],
 
-          quantity: {
-            type: Number,
-            required: true,
-            min: 1,
-          },
-        },
-      ],
-      default: [],
+        default: [],
+      },
     },
-  },
-  {
-    timestamps: true,
-    versionKey: false,
-  },
-);
+    {
+      timestamps: true,
+      versionKey: false,
+    },
+  );
 
 export type EconomyDocument =
-  InferSchemaType<typeof economySchema>;
+  InferSchemaType<
+    typeof economySchema
+  >;
 
-export const Economy = model<EconomyDocument>(
-  "Economy",
-  economySchema,
-);
+export const Economy =
+  model<EconomyDocument>(
+    "Economy",
+    economySchema,
+  );

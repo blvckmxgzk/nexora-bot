@@ -2,6 +2,10 @@ import {
   reconcileOpenPayouts,
 } from "./payoutService.js";
 
+import {
+  workerHealthService,
+} from "./marketplace/workerHealthService.js";
+
 let running =
   false;
 
@@ -13,6 +17,12 @@ let timer:
   null =
     null;
 
+const WORKER_NAME =
+  "payout_reconciliation" as const;
+
+const INTERVAL_MS =
+  60_000;
+
 export const payoutReconciliationWorker = {
   start(): void {
     if (running) {
@@ -21,6 +31,12 @@ export const payoutReconciliationWorker = {
 
     running =
       true;
+
+    void workerHealthService
+      .markStarted(
+        WORKER_NAME,
+        INTERVAL_MS,
+      );
 
     console.log(
       "💸 Payout reconciliation worker started",
@@ -33,13 +49,18 @@ export const payoutReconciliationWorker = {
         () => {
           void this.run();
         },
-        60_000,
+        INTERVAL_MS,
       );
   },
 
   stop(): void {
     running =
       false;
+
+    void workerHealthService
+      .markStopped(
+        WORKER_NAME,
+      );
 
     if (timer) {
       clearInterval(
@@ -51,7 +72,8 @@ export const payoutReconciliationWorker = {
     }
   },
 
-  async run(): Promise<void> {
+  async run():
+    Promise<void> {
     if (
       !running ||
       cycleRunning
@@ -62,10 +84,37 @@ export const payoutReconciliationWorker = {
     cycleRunning =
       true;
 
+    const startedAt =
+      Date.now();
+
+    await workerHealthService
+      .markCycleStarted(
+        WORKER_NAME,
+      );
+
     try {
       const result =
         await reconcileOpenPayouts(
           50,
+        );
+
+      await workerHealthService
+        .markCycleSuccess(
+          WORKER_NAME,
+
+          Date.now() -
+            startedAt,
+
+          {
+            checked:
+              result.checked,
+
+            reconciled:
+              result.reconciled,
+
+            pending:
+              result.failed,
+          },
         );
 
       if (
@@ -77,6 +126,16 @@ export const payoutReconciliationWorker = {
         );
       }
     } catch (error) {
+      await workerHealthService
+        .markCycleFailure(
+          WORKER_NAME,
+
+          Date.now() -
+            startedAt,
+
+          error,
+        );
+
       console.error(
         "❌ Payout reconciliation worker failed:",
         error,

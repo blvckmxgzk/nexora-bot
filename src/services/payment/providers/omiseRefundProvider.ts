@@ -115,6 +115,11 @@ export const omiseRefundProvider:
           },
 
           body,
+
+          signal:
+            AbortSignal.timeout(
+              15_000,
+            ),
         },
       );
 
@@ -223,6 +228,11 @@ export const omiseRefundProvider:
             Authorization:
               createAuthHeader(),
           },
+
+          signal:
+            AbortSignal.timeout(
+              15_000,
+            ),
         },
       );
 

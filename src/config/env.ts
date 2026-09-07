@@ -14,6 +14,17 @@ const envSchema = z.object({
   MONGODB_URI:
     z.string().min(1),
 
+  MARKETPLACE_MAINTENANCE:
+    z.enum([
+      "true",
+      "false",
+    ])
+      .default("true")
+      .transform(
+        (value) =>
+          value === "true",
+      ),
+
   MARKETPLACE_FORUM_CHANNEL_ID:
     z.string().min(1),
 
@@ -66,6 +77,11 @@ const envSchema = z.object({
       .optional(),
 
   NEXORA_PAYMENT_APPROVED_CATEGORIES:
+    z.string()
+      .min(1)
+      .optional(),
+
+  NEXO_MINER_ANNOUNCEMENT_CHANNEL_ID:
     z.string()
       .min(1)
       .optional(),

@@ -44,6 +44,25 @@ export interface FindPayoutTransferInput {
   amountSatang: number;
 }
 
+export interface PayoutProviderBalanceSnapshot {
+  currency:
+    string;
+
+  totalSatang:
+    number;
+
+  transferableSatang:
+    number;
+
+  onHoldSatang:
+    number |
+    null;
+
+  reserveSatang:
+    number |
+    null;
+}
+
 export interface PayoutTransferSnapshot {
   providerTransferId: string;
   recipientId: string;
@@ -81,6 +100,9 @@ export interface PayoutProvider {
   retrieveRecipient(
     recipientId: string,
   ): Promise<PayoutRecipientSnapshot>;
+
+  retrieveBalance():
+    Promise<PayoutProviderBalanceSnapshot>;
 
   createTransfer(
     input:

@@ -4,34 +4,54 @@ import {
   SlashCommandBuilder,
 } from "discord.js";
 
-import { economyService } from "../../services/economyService.js";
+import {
+  economyService,
+} from "../../services/economyService.js";
 
-export const data = new SlashCommandBuilder()
-  .setName("balance")
-  .setDescription(
-    "Check your NEXORA balance.",
-  );
+import {
+  toSuffix,
+} from "../../services/nexo/NexoNumber.js";
+
+export const data =
+  new SlashCommandBuilder()
+    .setName(
+      "balance",
+    )
+    .setDescription(
+      "ดูยอด NEXO ของคุณ",
+    );
 
 export async function execute(
-  interaction: ChatInputCommandInteraction,
+  interaction:
+    ChatInputCommandInteraction,
 ): Promise<void> {
   const balance =
-    await economyService.getBalance(
-      interaction.user.id,
-    );
+    await economyService
+      .getBalance(
+        interaction.user.id,
+      );
 
   const embed =
     new EmbedBuilder()
-      .setTitle("💰 NEXORA Wallet")
+      .setTitle(
+        "💰 NEXO Wallet",
+      )
       .setDescription(
-        `ยอดเงินของคุณคือ **${balance.toLocaleString()} NEXO**`,
+        `คุณมี **${toSuffix(balance)} NEXO**`,
       )
       .setThumbnail(
-        interaction.user.displayAvatarURL(),
+        interaction.user
+          .displayAvatarURL(),
       )
+      .setFooter({
+        text:
+          "NEXORA • NEXO Economy",
+      })
       .setTimestamp();
 
   await interaction.reply({
-    embeds: [embed],
+    embeds: [
+      embed,
+    ],
   });
 }

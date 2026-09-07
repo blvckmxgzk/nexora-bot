@@ -10,20 +10,20 @@ import {
 } from "./payment/platformPaymentCapabilityService.js";
 
 import {
+  marketplaceRiskService,
+} from "./marketplace/marketplaceRiskService.js";
+
+import {
   paymentProviderRegistry,
 } from "./payment/paymentProviderRegistry.js";
 
-import {
-  getMarketplaceDiscordClient,
-} from "./marketplace/marketplaceNotificationService.js";
+import type {
+  PaymentAccountingSnapshot,
+} from "./payment/paymentProvider.js";
 
 import {
-  sendBuyerOrderPaidDM,
-} from "./marketplace/buyerOrderNotificationService.js";
-
-import {
-  sendSellerOrderPaidDM,
-} from "./marketplace/sellerOrderNotificationService.js";
+  notificationDeliveryService,
+} from "./marketplace/notificationDeliveryService.js";
 
 async function finalizeFailedPayment(
   paymentId: string,
@@ -210,6 +210,224 @@ async function finalizeFailedPayment(
   } finally {
     await session.endSession();
   }
+}
+
+function shouldRequirePaymentAccounting():
+  boolean {
+  /*
+   * Production/development:
+   * accounting required
+   *
+   * Legacy unit tests:
+   * gross fallback remains available
+   */
+  return (
+    process.env.NODE_ENV !==
+      "test" ||
+    process.env
+      .NEXORA_TEST_REQUIRE_PAYMENT_ACCOUNTING ===
+      "1"
+  );
+}
+
+function buildPaymentAccountingFields(
+  paymentAmount:
+    number,
+
+  accounting:
+    PaymentAccountingSnapshot |
+    null |
+    undefined,
+) {
+  const gross =
+    Math.round(
+      paymentAmount *
+      100,
+    );
+
+  if (
+    !Number.isSafeInteger(
+      gross,
+    ) ||
+    gross < 0
+  ) {
+    throw new Error(
+      "Payment gross amount ไม่ถูกต้อง",
+    );
+  }
+
+  if (!accounting) {
+    if (
+      shouldRequirePaymentAccounting()
+    ) {
+      throw new Error(
+        "Payment Provider ยืนยัน paid แต่ไม่มี fee/net accounting",
+      );
+    }
+
+    return {
+      grossAmountSatang:
+        gross,
+
+      fundingAmountSatang:
+        gross,
+
+      providerFeeSatang:
+        null,
+
+      providerFeeVatSatang:
+        null,
+
+      providerDeductionsSatang:
+        null,
+
+      providerNetSatang:
+        gross,
+
+      sellerNetSatang:
+        gross,
+
+      providerTransactionId:
+        null,
+
+      accountingPolicy:
+        "legacy_gross" as const,
+
+      accountingVerifiedAt:
+        null,
+    };
+  }
+
+  if (
+    accounting.currency
+      .toUpperCase() !==
+      "THB" ||
+    accounting.fundingCurrency
+      .toUpperCase() !==
+      "THB"
+  ) {
+    throw new Error(
+      "Payment accounting currency ไม่ถูกต้อง",
+    );
+  }
+
+  if (
+    accounting
+      .grossAmountSatang !==
+    gross
+  ) {
+    throw new Error(
+      "Payment accounting gross ไม่ตรงกับ Payment",
+    );
+  }
+
+  if (
+    accounting
+      .fundingAmountSatang !==
+    gross
+  ) {
+    throw new Error(
+      "NEXORA ยังไม่รองรับ funding amount ที่ต่างจาก gross",
+    );
+  }
+
+  const integerFields = [
+    accounting.providerFeeSatang,
+    accounting.providerFeeVatSatang,
+    accounting.providerDeductionsSatang,
+    accounting.providerNetSatang,
+  ];
+
+  if (
+    integerFields.some(
+      (value) =>
+        !Number.isSafeInteger(
+          value,
+        ) ||
+        value < 0,
+    )
+  ) {
+    throw new Error(
+      "Payment accounting มีจำนวนเงินไม่ถูกต้อง",
+    );
+  }
+
+  if (
+    accounting.providerNetSatang >
+    gross
+  ) {
+    throw new Error(
+      "Payment provider net มากกว่า gross",
+    );
+  }
+
+  if (
+    accounting
+      .providerDeductionsSatang !==
+    gross -
+      accounting
+        .providerNetSatang
+  ) {
+    throw new Error(
+      "Payment provider deductions ไม่ตรงกับ gross - net",
+    );
+  }
+
+  if (
+    accounting.providerFeeSatang +
+      accounting.providerFeeVatSatang >
+    accounting
+      .providerDeductionsSatang
+  ) {
+    throw new Error(
+      "Payment provider fee accounting ไม่สอดคล้องกัน",
+    );
+  }
+
+  return {
+    grossAmountSatang:
+      accounting
+        .grossAmountSatang,
+
+    fundingAmountSatang:
+      accounting
+        .fundingAmountSatang,
+
+    providerFeeSatang:
+      accounting
+        .providerFeeSatang,
+
+    providerFeeVatSatang:
+      accounting
+        .providerFeeVatSatang,
+
+    providerDeductionsSatang:
+      accounting
+        .providerDeductionsSatang,
+
+    providerNetSatang:
+      accounting
+        .providerNetSatang,
+
+    /*
+     * Phase 5.9 policy:
+     * Seller pays provider charge deductions.
+     * NEXORA platform commission = 0.
+     */
+    sellerNetSatang:
+      accounting
+        .providerNetSatang,
+
+    providerTransactionId:
+      accounting
+        .providerTransactionId,
+
+    accountingPolicy:
+      "seller_pays_provider_fee" as const,
+
+    accountingVerifiedAt:
+      new Date(),
+  };
 }
 
 export const paymentService = {
@@ -711,6 +929,33 @@ export const paymentService = {
           order.totalAmount,
       });
 
+    const riskDecision =
+      await marketplaceRiskService
+        .evaluatePaymentCreation({
+          orderId:
+            order.orderId,
+
+          buyerId:
+            data.buyerId,
+
+          sellerId:
+            order.sellerId,
+
+          shopId:
+            order.shopId,
+
+          provider:
+            data.provider,
+
+          amountBaht:
+            order.totalAmount,
+        });
+
+    marketplaceRiskService
+      .assertNotBlocked(
+        riskDecision,
+      );
+
     const paymentId =
       `PAY-${Date.now()}-` +
       Math.random()
@@ -847,6 +1092,18 @@ export const paymentService = {
 
                   creationLastError:
                     null,
+
+                  riskEventId:
+                    riskDecision
+                      .riskEventId,
+
+                  riskDecision:
+                    riskDecision
+                      .decision,
+
+                  riskScore:
+                    riskDecision
+                      .score,
                 },
               });
 
@@ -1238,6 +1495,9 @@ export const paymentService = {
     paymentId: string,
     providerPaymentId: string,
     providerPaidAt?: Date | null,
+    providerAccounting?:
+      PaymentAccountingSnapshot |
+      null,
   ) {
     const session = await mongoose.startSession();
 
@@ -1288,6 +1548,12 @@ export const paymentService = {
             ? providerPaidAt
             : now;
 
+        const accountingFields =
+          buildPaymentAccountingFields(
+            payment.amount,
+            providerAccounting,
+          );
+
         const order = await Order.findOne({
           orderId: payment.orderId,
         }).session(session);
@@ -1322,6 +1588,8 @@ export const paymentService = {
                 status: "paid",
                 providerPaymentId,
                 paidAt,
+
+                ...accountingFields,
               },
             },
             {
@@ -1423,44 +1691,37 @@ export const paymentService = {
       }
 
       // ------------------------------------------------------
-      // Discord DM ต้องอยู่นอก MongoDB transaction
+      // Customer notification ต้องอยู่นอก MongoDB transaction
+      //
+      // Phase 6.3B:
+      // สร้าง durable audit + retry แทน fire-and-forget DM
       // ------------------------------------------------------
       if (shouldNotify) {
-        try {
-          const discordClient =
-            getMarketplaceDiscordClient();
+        for (
+          const eventType
+          of [
+            "order_paid_buyer",
+            "order_paid_seller",
+          ] as const
+        ) {
+          try {
+            await notificationDeliveryService
+              .enqueueAndAttempt({
+                eventType,
 
-          const dmSent =
-            await sendBuyerOrderPaidDM(
-              discordClient,
-              paidPayment.orderId,
-            );
-
-          if (!dmSent) {
-            console.warn(
-              `⚠️ Buyer DM was not sent: Order ${paidPayment.orderId}`,
+                resourceId:
+                  paidPayment.orderId,
+              });
+          } catch (error) {
+            /*
+             * Notification infrastructure
+             * ห้ามทำให้ Payment ที่ paid แล้ว rollback
+             */
+            console.error(
+              `⚠️ Failed to enqueue ${eventType} for Order ${paidPayment.orderId}:`,
+              error,
             );
           }
-        } catch (error) {
-          console.error(
-            `⚠️ Failed to send buyer paid DM for Order ${paidPayment.orderId}:`,
-            error,
-          );
-        }
-
-        try {
-          const discordClient =
-            getMarketplaceDiscordClient();
-
-          await sendSellerOrderPaidDM(
-            discordClient,
-            paidPayment.orderId,
-          );
-        } catch (error) {
-          console.error(
-            `⚠️ Failed to send seller paid DM for Order ${paidPayment.orderId}:`,
-            error,
-          );
         }
       }
 
@@ -1873,6 +2134,8 @@ export const paymentService = {
         payment.paymentId,
         payment.providerPaymentId,
         result.paidAt,
+        result.accounting ??
+          null,
       );
     }
 

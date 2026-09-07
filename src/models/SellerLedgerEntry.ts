@@ -50,6 +50,12 @@ const sellerLedgerEntrySchema =
         index: true,
       },
 
+      disputeId: {
+        type: String,
+        default: null,
+        index: true,
+      },
+
       type: {
         type: String,
         enum: [
@@ -57,6 +63,10 @@ const sellerLedgerEntrySchema =
           "refund_debit",
           "payout_reserve",
           "payout_release",
+          "accounting_adjustment_credit",
+          "accounting_adjustment_debit",
+          "dispute_loss_debit",
+          "dispute_recovery_credit",
         ],
         required: true,
         index: true,

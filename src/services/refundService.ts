@@ -9,6 +9,13 @@ import {
   resolveRefundProviderName,
 } from "./payment/refundProviderRegistry.js";
 import { sellerLedgerService } from "./sellerLedgerService.js";
+import {
+  marketplaceRiskService,
+} from "./marketplace/marketplaceRiskService.js";
+
+import {
+  marketplaceRiskReviewService,
+} from "./marketplace/marketplaceRiskReviewService.js";
 
 function generateRefundId(): string {
   return `NXR-${crypto
@@ -43,6 +50,67 @@ export const refundService = {
   ) {
     const trimmedReason =
       validateRefundReason(reason);
+
+    const preflightOrder =
+      await Order.findOne({
+        orderId,
+      });
+
+    if (!preflightOrder) {
+      throw new Error(
+        "ไม่พบคำสั่งซื้อ",
+      );
+    }
+
+    if (
+      preflightOrder.buyerId !==
+      buyerId
+    ) {
+      throw new Error(
+        "คุณไม่มีสิทธิ์ขอคืนเงินสำหรับคำสั่งซื้อนี้",
+      );
+    }
+
+    if (
+      preflightOrder.status !==
+        "paid" &&
+      preflightOrder.status !==
+        "processing" &&
+      preflightOrder.status !==
+        "completed"
+    ) {
+      throw new Error(
+        "คำสั่งซื้อนี้ไม่สามารถขอคืนเงินได้",
+      );
+    }
+
+    const refundId =
+      generateRefundId();
+
+    const riskDecision =
+      await marketplaceRiskService
+        .evaluateRefundRequest({
+          refundId,
+
+          orderId:
+            preflightOrder.orderId,
+
+          buyerId,
+
+          sellerId:
+            preflightOrder.sellerId,
+
+          shopId:
+            preflightOrder.shopId,
+
+          amountBaht:
+            preflightOrder.totalAmount,
+        });
+
+    marketplaceRiskService
+      .assertNotBlocked(
+        riskDecision,
+      );
 
     const session =
       await mongoose.startSession();
@@ -154,8 +222,7 @@ export const refundService = {
 
           const refund =
             new Refund({
-              refundId:
-                generateRefundId(),
+              refundId,
 
               orderId:
                 order.orderId,
@@ -193,11 +260,78 @@ export const refundService = {
 
               requestedBy:
                 buyerId,
+
+              riskEventId:
+                riskDecision
+                  .riskEventId,
+
+              riskDecision:
+                riskDecision
+                  .decision,
+
+              riskScore:
+                riskDecision
+                  .score,
             });
 
           await refund.save({
             session,
           });
+
+          if (
+            riskDecision
+              .decision ===
+            "review"
+          ) {
+            const review =
+              await marketplaceRiskReviewService
+                .createReview(
+                  {
+                    decision:
+                      riskDecision,
+
+                    resourceType:
+                      "refund",
+
+                    resourceId:
+                      refund.refundId,
+
+                    subjectType:
+                      "buyer",
+
+                    subjectId:
+                      buyerId,
+
+                    buyerId,
+
+                    sellerId:
+                      refund.sellerId,
+
+                    shopId:
+                      refund.shopId,
+
+                    metadata: {
+                      orderId:
+                        refund.orderId,
+
+                      amount:
+                        refund.amount,
+                    },
+                  },
+
+                  session,
+                );
+
+            refund.riskReviewId =
+              review.reviewId;
+
+            refund.riskReviewStatus =
+              "pending";
+
+            await refund.save({
+              session,
+            });
+          }
 
           createdRefund =
             refund;
@@ -228,6 +362,18 @@ export const refundService = {
       throw new Error(
         "ไม่พบผู้อนุมัติ Refund",
       );
+    }
+
+    const reviewCandidate =
+      await Refund.findOne({
+        refundId,
+      });
+
+    if (reviewCandidate) {
+      await marketplaceRiskReviewService
+        .assertRefundApprovalAllowed(
+          reviewCandidate,
+        );
     }
 
     const refund =

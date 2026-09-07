@@ -6,6 +6,10 @@ import {
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import {
+  marketplaceMaintenanceService,
+} from "../services/community/marketplaceMaintenanceService.js";
+
 export interface Command {
   data: SlashCommandBuilder;
 
@@ -85,6 +89,30 @@ export class CommandHandler {
       await interaction.reply({
         content: "❌ Unknown command.",
         ephemeral: true,
+      });
+
+      return;
+    }
+
+    if (
+      await marketplaceMaintenanceService
+        .shouldBlockCommand(
+          interaction.commandName,
+        )
+    ) {
+      const state =
+        await marketplaceMaintenanceService
+          .getState();
+
+      await interaction.reply({
+        content:
+          marketplaceMaintenanceService
+            .getMaintenanceMessage(
+              state.reason,
+            ),
+
+        ephemeral:
+          true,
       });
 
       return;

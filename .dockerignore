@@ -6,6 +6,10 @@ dist
 .env.*
 !.env.example
 coverage
-.nexora-smoke
-marketplace-*.txt
+.vscode
+.idea
 *.log
+*.txt
+.nexora-smoke
+tests
+marketplace-phase*.txt

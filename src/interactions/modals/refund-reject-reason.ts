@@ -7,8 +7,8 @@ import {
 } from "../../services/refundService.js";
 
 import {
-  getMarketplaceDiscordClient,
-} from "../../services/marketplace/marketplaceNotificationService.js";
+  notificationDeliveryService,
+} from "../../services/marketplace/notificationDeliveryService.js";
 
 export const customId =
   "nexora_refund_reject_reason:";
@@ -53,35 +53,17 @@ export async function execute(
       );
 
     try {
-      const client =
-        getMarketplaceDiscordClient();
+      await notificationDeliveryService
+        .enqueueAndAttempt({
+          eventType:
+            "refund_rejected_buyer",
 
-      const buyer =
-        await client.users.fetch(
-          refund.buyerId,
-        );
-
-      await buyer.send({
-        content:
-          [
-            "❌ **คำขอคืนเงินถูกปฏิเสธ**",
-            "",
-            `🧾 Order ID: \`${refund.orderId}\``,
-            `💸 Refund ID: \`${refund.refundId}\``,
-            "",
-            `**เหตุผลจากร้านค้า:**\n${reason}`,
-            "",
-            "หากคุณคิดว่าการปฏิเสธไม่เป็นธรรม สามารถใช้ปุ่ม 🚨 Report Scam เพื่อส่งเรื่องให้ทีมงานตรวจสอบได้",
-          ].join("\n"),
-      });
+          resourceId:
+            refund.refundId,
+        });
     } catch (notificationError) {
-      /*
-       * Buyer DM ล้มเหลว
-       * แต่ Refund ถูก Reject ในฐานข้อมูลแล้ว
-       * จึงไม่ควรทำให้ action หลักล้มเหลว
-       */
       console.error(
-        "⚠️ Failed to notify buyer about rejected refund:",
+        "⚠️ Failed to enqueue rejected Refund notification:",
         notificationError,
       );
     }

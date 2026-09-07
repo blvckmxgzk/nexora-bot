@@ -6,13 +6,36 @@ import type {
   PaymentProvider,
   PaymentProviderName,
   PaymentVerificationResult,
+  PaymentAccountingSnapshot,
 } from "../paymentProvider.js";
 
 interface OmiseCharge {
   id: string;
+
+  livemode?: boolean;
+
   amount: number;
+
   currency: string;
+
   status: string;
+
+  fee?: number | null;
+
+  fee_vat?: number | null;
+
+  funding_amount?: number | null;
+
+  funding_currency?: string | null;
+
+  net?: number | null;
+
+  transaction?:
+    | string
+    | {
+        id?: string;
+      }
+    | null;
   paid_at?: string | null;
   expires_at?: string | null;
   authorize_uri?: string | null;
@@ -109,6 +132,210 @@ function fromSatang(
   amount: number,
 ): number {
   return amount / 100;
+}
+
+function assertTestCharge(
+  charge:
+    OmiseCharge,
+): void {
+  if (
+    charge.livemode ===
+    true
+  ) {
+    throw new Error(
+      "Omise ส่ง Live Charge กลับมา แต่ NEXORA ยังอยู่ใน Pre-Live mode",
+    );
+  }
+}
+
+function nullableTransactionId(
+  value:
+    OmiseCharge[
+      "transaction"
+    ],
+): string | null {
+  if (
+    typeof value ===
+    "string"
+  ) {
+    return value;
+  }
+
+  return (
+    value?.id ??
+    null
+  );
+}
+
+function normalizePaidAccounting(
+  charge:
+    OmiseCharge,
+):
+  | PaymentAccountingSnapshot
+  | null {
+  assertTestCharge(
+    charge,
+  );
+
+  if (
+    charge.status !==
+    "successful"
+  ) {
+    return null;
+  }
+
+  /*
+   * Legacy test fixtures อาจไม่มี
+   * accounting fields
+   *
+   * production paymentService จะ
+   * fail closed หาก paid Charge
+   * ไม่มี accounting
+   */
+  if (
+    charge.fee == null ||
+    charge.fee_vat == null ||
+    charge.net == null
+  ) {
+    return null;
+  }
+
+  const gross =
+    charge.amount;
+
+  const funding =
+    charge.funding_amount ??
+    gross;
+
+  const fee =
+    charge.fee;
+
+  const feeVat =
+    charge.fee_vat;
+
+  const net =
+    charge.net;
+
+  for (
+    const [
+      name,
+      value,
+    ]
+    of [
+      [
+        "amount",
+        gross,
+      ],
+      [
+        "funding_amount",
+        funding,
+      ],
+      [
+        "fee",
+        fee,
+      ],
+      [
+        "fee_vat",
+        feeVat,
+      ],
+      [
+        "net",
+        net,
+      ],
+    ] as const
+  ) {
+    if (
+      !Number.isSafeInteger(
+        value,
+      ) ||
+      value < 0
+    ) {
+      throw new Error(
+        `Omise Charge ${name} ไม่ถูกต้อง`,
+      );
+    }
+  }
+
+  const currency =
+    charge.currency
+      .toUpperCase();
+
+  const fundingCurrency =
+    (
+      charge.funding_currency ??
+      charge.currency
+    ).toUpperCase();
+
+  if (
+    currency !==
+      "THB" ||
+    fundingCurrency !==
+      "THB"
+  ) {
+    throw new Error(
+      "Omise Charge accounting ต้องเป็น THB",
+    );
+  }
+
+  if (
+    funding !==
+    gross
+  ) {
+    throw new Error(
+      "NEXORA ยังไม่รองรับ multi-currency Payment accounting",
+    );
+  }
+
+  if (
+    net >
+    funding
+  ) {
+    throw new Error(
+      "Omise Charge net มากกว่า funding amount",
+    );
+  }
+
+  const deductions =
+    funding -
+    net;
+
+  if (
+    fee + feeVat >
+    deductions
+  ) {
+    throw new Error(
+      "Omise Charge fee + VAT มากกว่า provider deductions",
+    );
+  }
+
+  return {
+    grossAmountSatang:
+      gross,
+
+    fundingAmountSatang:
+      funding,
+
+    providerFeeSatang:
+      fee,
+
+    providerFeeVatSatang:
+      feeVat,
+
+    providerDeductionsSatang:
+      deductions,
+
+    providerNetSatang:
+      net,
+
+    currency,
+
+    fundingCurrency,
+
+    providerTransactionId:
+      nullableTransactionId(
+        charge.transaction,
+      ),
+  };
 }
 
 async function omiseRequest<T>(
@@ -267,6 +494,10 @@ export class OmiseProvider
         },
       );
 
+    assertTestCharge(
+      charge,
+    );
+
     const qrUrl =
       charge.source
         ?.scannable_code
@@ -390,6 +621,10 @@ export class OmiseProvider
       return null;
     }
 
+    assertTestCharge(
+      charge,
+    );
+
     const qrUrl =
       charge.source
         ?.scannable_code
@@ -455,12 +690,21 @@ export class OmiseProvider
         )}`,
       );
 
+    assertTestCharge(
+      charge,
+    );
+
     const providerExpiresAt =
       charge.expires_at
         ? new Date(
             charge.expires_at,
           )
         : null;
+
+    const accounting =
+      normalizePaidAccounting(
+        charge,
+      );
 
     return {
       paid:
@@ -493,6 +737,8 @@ export class OmiseProvider
         )
           ? providerExpiresAt
           : null,
+
+      accounting,
     };
   }
 

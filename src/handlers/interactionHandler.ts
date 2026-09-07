@@ -8,6 +8,10 @@ import { join } from "node:path";
 
 import { CommandHandler } from "./commandHandler.js";
 
+import {
+  marketplaceMaintenanceService,
+} from "../services/community/marketplaceMaintenanceService.js";
+
 export interface NEXORAInteraction {
   customId: string;
 
@@ -204,6 +208,39 @@ export class InteractionHandler {
     interaction: Interaction,
   ): Promise<void> {
     try {
+      if (
+        (
+          interaction.isButton() ||
+          interaction.isAnySelectMenu() ||
+          interaction.isModalSubmit()
+        ) &&
+        await marketplaceMaintenanceService
+          .shouldBlockCustomId(
+            interaction.customId,
+          )
+      ) {
+        if (
+          interaction.isRepliable()
+        ) {
+          const state =
+            await marketplaceMaintenanceService
+              .getState();
+
+          await interaction.reply({
+            content:
+              marketplaceMaintenanceService
+                .getMaintenanceMessage(
+                  state.reason,
+                ),
+
+            ephemeral:
+              true,
+          });
+        }
+
+        return;
+      }
+
       if (
         interaction.isChatInputCommand()
       ) {

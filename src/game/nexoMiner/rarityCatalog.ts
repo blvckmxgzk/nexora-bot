@@ -1,0 +1,185 @@
+export const MINER_RARITIES = [
+  {
+    id: "common",
+    name: "Common",
+    emoji: "⚪",
+    tier: 0,
+    weight: 500_000_000,
+  },
+  {
+    id: "uncommon",
+    name: "Uncommon",
+    emoji: "🟢",
+    tier: 1,
+    weight: 250_000_000,
+  },
+  {
+    id: "rare",
+    name: "Rare",
+    emoji: "🔵",
+    tier: 2,
+    weight: 120_000_000,
+  },
+  {
+    id: "elite",
+    name: "Elite",
+    emoji: "🩵",
+    tier: 3,
+    weight: 60_000_000,
+  },
+  {
+    id: "epic",
+    name: "Epic",
+    emoji: "🟣",
+    tier: 4,
+    weight: 30_000_000,
+  },
+  {
+    id: "heroic",
+    name: "Heroic",
+    emoji: "🔴",
+    tier: 5,
+    weight: 15_000_000,
+  },
+  {
+    id: "legendary",
+    name: "Legendary",
+    emoji: "🟡",
+    tier: 6,
+    weight: 7_000_000,
+  },
+  {
+    id: "mythic",
+    name: "Mythic",
+    emoji: "🔥",
+    tier: 7,
+    weight: 3_000_000,
+  },
+  {
+    id: "ancient",
+    name: "Ancient",
+    emoji: "🏺",
+    tier: 8,
+    weight: 1_000_000,
+  },
+  {
+    id: "arcane",
+    name: "Arcane",
+    emoji: "🔮",
+    tier: 9,
+    weight: 400_000,
+  },
+  {
+    id: "divine",
+    name: "Divine",
+    emoji: "✨",
+    tier: 10,
+    weight: 150_000,
+  },
+  {
+    id: "exalted",
+    name: "Exalted",
+    emoji: "👑",
+    tier: 11,
+    weight: 50_000,
+  },
+  {
+    id: "celestial",
+    name: "Celestial",
+    emoji: "🌟",
+    tier: 12,
+    weight: 15_000,
+  },
+  {
+    id: "astral",
+    name: "Astral",
+    emoji: "🌌",
+    tier: 13,
+    weight: 5_000,
+  },
+  {
+    id: "cosmic",
+    name: "Cosmic",
+    emoji: "☄️",
+    tier: 14,
+    weight: 1_500,
+  },
+  {
+    id: "galactic",
+    name: "Galactic",
+    emoji: "🪐",
+    tier: 15,
+    weight: 500,
+  },
+  {
+    id: "transcendent",
+    name: "Transcendent",
+    emoji: "💠",
+    tier: 16,
+    weight: 150,
+  },
+  {
+    id: "primordial",
+    name: "Primordial",
+    emoji: "🧬",
+    tier: 17,
+    weight: 50,
+  },
+  {
+    id: "voidborn",
+    name: "Voidborn",
+    emoji: "🌑",
+    tier: 18,
+    weight: 15,
+  },
+  {
+    id: "reality",
+    name: "Reality",
+    emoji: "🪞",
+    tier: 19,
+    weight: 5,
+  },
+  {
+    id: "singularity",
+    name: "Singularity",
+    emoji: "🕳️",
+    tier: 20,
+    weight: 2,
+  },
+  {
+    id: "eternal",
+    name: "Eternal",
+    emoji: "♾️",
+    tier: 21,
+    weight: 0.5,
+  },
+  {
+    id: "infinite",
+    name: "Infinite",
+    emoji: "∞",
+    tier: 22,
+    weight: 0.1,
+  },
+  {
+    id: "omega",
+    name: "Omega",
+    emoji: "Ω",
+    tier: 23,
+    weight: 0.01,
+  },
+] as const;
+
+export type MinerRarity =
+  typeof MINER_RARITIES[number]["id"];
+
+export const MINER_RARITY_MAP =
+  new Map(
+    MINER_RARITIES.map(
+      (
+        rarity,
+      ) => [
+        rarity.id,
+        rarity,
+      ],
+    ),
+  );

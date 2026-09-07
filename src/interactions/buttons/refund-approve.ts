@@ -15,8 +15,8 @@ import {
 } from "../../models/Order.js";
 
 import {
-  getMarketplaceDiscordClient,
-} from "../../services/marketplace/marketplaceNotificationService.js";
+  notificationDeliveryService,
+} from "../../services/marketplace/notificationDeliveryService.js";
 
 export const customId =
   "nexora_refund_approve:";
@@ -92,33 +92,19 @@ export async function execute(
         refundId,
       );
 
-    const client =
-      getMarketplaceDiscordClient();
-
     try {
-      const buyer =
-        await client.users.fetch(
-          refund.buyerId,
-        );
+      await notificationDeliveryService
+        .enqueueAndAttempt({
+          eventType:
+            "refund_completed_buyer",
 
-      await buyer.send({
-        content:
-          [
-            "💰 **คืนเงินสำเร็จ**",
-            "",
-            `🧾 Order ID: \`${refund.orderId}\``,
-            `💸 Refund ID: \`${refund.refundId}\``,
-            `💰 จำนวน: ฿${refund.amount.toLocaleString("th-TH", {
-              minimumFractionDigits: 2,
-            })}`,
-            "",
-            "ระบบได้ดำเนินการคืนเงินผ่าน Payment Provider แล้ว",
-          ].join("\n"),
-      });
-    } catch (buyerError) {
+          resourceId:
+            completed.refundId,
+        });
+    } catch (notificationError) {
       console.error(
-        "⚠️ Failed to notify buyer about refund:",
-        buyerError,
+        "⚠️ Failed to enqueue completed Refund notification:",
+        notificationError,
       );
     }
 

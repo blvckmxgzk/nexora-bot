@@ -26,6 +26,31 @@ interface OmiseRecipientResponse {
     | null;
 }
 
+interface OmiseBalanceResponse {
+  object?:
+    string;
+
+  livemode:
+    boolean;
+
+  currency:
+    string;
+
+  total:
+    number;
+
+  transferable:
+    number;
+
+  on_hold?:
+    number |
+    null;
+
+  reserve?:
+    number |
+    null;
+}
+
 interface OmiseTransferResponse {
   object?: string;
   id: string;
@@ -399,9 +424,114 @@ function normalizeTransfer(
   };
 }
 
+function validateBalanceInteger(
+  value:
+    unknown,
+
+  name:
+    string,
+): number {
+  if (
+    !Number.isSafeInteger(
+      value,
+    ) ||
+    (value as number) <
+      0
+  ) {
+    throw new Error(
+      `Omise Balance ${name} ไม่ถูกต้อง`,
+    );
+  }
+
+  return value as number;
+}
+
+function normalizeBalance(
+  balance:
+    OmiseBalanceResponse,
+) {
+  if (
+    balance.livemode
+  ) {
+    throw new Error(
+      "Omise ส่ง Live Balance กลับมา แต่ NEXORA อยู่ใน Test Mode",
+    );
+  }
+
+  const currency =
+    balance.currency
+      ?.toUpperCase();
+
+  if (
+    currency !==
+    "THB"
+  ) {
+    throw new Error(
+      `Omise Balance currency ไม่รองรับ: ${currency ?? "unknown"}`,
+    );
+  }
+
+  const totalSatang =
+    validateBalanceInteger(
+      balance.total,
+      "total",
+    );
+
+  const transferableSatang =
+    validateBalanceInteger(
+      balance.transferable,
+      "transferable",
+    );
+
+  const onHoldSatang =
+    balance.on_hold ===
+      undefined ||
+    balance.on_hold ===
+      null
+      ? null
+      : validateBalanceInteger(
+          balance.on_hold,
+          "on_hold",
+        );
+
+  const reserveSatang =
+    balance.reserve ===
+      undefined ||
+    balance.reserve ===
+      null
+      ? null
+      : validateBalanceInteger(
+          balance.reserve,
+          "reserve",
+        );
+
+  return {
+    currency,
+
+    totalSatang,
+
+    transferableSatang,
+
+    onHoldSatang,
+
+    reserveSatang,
+  };
+}
+
 export const omisePayoutProvider = {
   name:
     "omise" as const,
+
+  async retrieveBalance() {
+    const balance =
+      await request<OmiseBalanceResponse>(
+        "/balance",
+      );
+
+    return normalizeBalance(
+      balance,
+    );
+  },
 
   async createRecipient(
     input: {

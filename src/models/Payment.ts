@@ -49,6 +49,92 @@ const paymentSchema = new Schema(
       min: 0,
     },
 
+    /*
+     * Provider accounting snapshot.
+     *
+     * ทุกค่าเป็น integer satang
+     * และถูก snapshot ตอน Provider
+     * ยืนยัน Payment สำเร็จ
+     */
+    grossAmountSatang: {
+      type: Number,
+      default: null,
+      validate: {
+        validator(value: unknown) {
+          return (
+            value == null ||
+            (
+              Number.isSafeInteger(value) &&
+              (value as number) >= 0
+            )
+          );
+        },
+      },
+    },
+
+    fundingAmountSatang: {
+      type: Number,
+      default: null,
+      validate: {
+        validator(value: unknown) {
+          return (
+            value == null ||
+            (
+              Number.isSafeInteger(value) &&
+              (value as number) >= 0
+            )
+          );
+        },
+      },
+    },
+
+    providerFeeSatang: {
+      type: Number,
+      default: null,
+    },
+
+    providerFeeVatSatang: {
+      type: Number,
+      default: null,
+    },
+
+    providerDeductionsSatang: {
+      type: Number,
+      default: null,
+    },
+
+    providerNetSatang: {
+      type: Number,
+      default: null,
+    },
+
+    sellerNetSatang: {
+      type: Number,
+      default: null,
+    },
+
+    providerTransactionId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+
+    accountingPolicy: {
+      type: String,
+      enum: [
+        "legacy_gross",
+        "seller_pays_provider_fee",
+      ],
+      default: null,
+      index: true,
+    },
+
+    accountingVerifiedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+
     status: {
       type: String,
       enum: [

@@ -18,6 +18,10 @@ import {
   sellerPayoutAccountService,
 } from "./sellerPayoutAccountService.js";
 
+import {
+  disputeService,
+} from "./disputeService.js";
+
 const WEBHOOK_PROCESSING_STALE_MS =
   5 * 60 * 1000;
 
@@ -39,6 +43,14 @@ const RECIPIENT_EVENTS =
     "recipient.deactivate",
     "recipient.verify",
     "recipient.destroy",
+  ]);
+
+const DISPUTE_EVENTS =
+  new Set([
+    "dispute.create",
+    "dispute.update",
+    "dispute.accept",
+    "dispute.close",
   ]);
 
 export interface OmiseReconciliationEvent {
@@ -96,6 +108,9 @@ export function isSupportedOmiseReconciliationEvent(
     ) ||
     RECIPIENT_EVENTS.has(
       key,
+    ) ||
+    DISPUTE_EVENTS.has(
+      key,
     )
   );
 }
@@ -110,7 +125,8 @@ async function claimEvent(
 
     resourceType:
       "payout" |
-      "recipient";
+      "recipient" |
+      "dispute";
 
     resourceId:
       string;
@@ -463,6 +479,124 @@ export const omiseWebhookReconciliationService = {
       throw new Error(
         "Omise reconciliation event is incomplete",
       );
+    }
+
+    if (
+      DISPUTE_EVENTS.has(
+        eventKey,
+      )
+    ) {
+      const claim =
+        await claimEvent({
+          eventId,
+
+          eventKey,
+
+          resourceType:
+            "dispute",
+
+          resourceId:
+            providerResourceId,
+
+          internalResourceId:
+            providerResourceId,
+        });
+
+      if (
+        claim.state ===
+          "duplicate"
+      ) {
+        return {
+          success:
+            true,
+
+          duplicate:
+            true,
+
+          eventId,
+
+          status:
+            "processed",
+        };
+      }
+
+      if (
+        claim.state ===
+          "busy"
+      ) {
+        return {
+          success:
+            false,
+
+          retry:
+            true,
+
+          eventId,
+
+          error:
+            "Webhook is already being processed",
+        };
+      }
+
+      try {
+        const reconciled =
+          await disputeService
+            .reconcileProviderDispute(
+              providerResourceId,
+            );
+
+        await markProcessed(
+          eventId,
+        );
+
+        if (
+          reconciled.ignored ===
+          true
+        ) {
+          return {
+            success:
+              true,
+
+            ignored:
+              true,
+
+            eventId,
+
+            resourceType:
+              "dispute",
+          };
+        }
+
+        return {
+          success:
+            true,
+
+          processed:
+            true,
+
+          eventId,
+
+          resourceType:
+            "dispute",
+
+          disputeId:
+            reconciled
+              .dispute
+              .disputeId,
+
+          status:
+            reconciled
+              .dispute
+              .status,
+        };
+      } catch (error) {
+        await markFailed(
+          eventId,
+          error,
+        );
+
+        throw error;
+      }
     }
 
     if (
