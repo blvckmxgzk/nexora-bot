@@ -20,6 +20,14 @@ import {
 } from "./services/paymentExpirationWorker.js";
 
 import {
+  payoutReconciliationWorker,
+} from "./services/payoutReconciliationWorker.js";
+
+import {
+  assertMarketplaceFinancialRuntimeSafety,
+} from "./services/marketplace/financialRuntimeSafety.js";
+
+import {
   createApiServer,
 } from "./api/server.js";
 
@@ -58,6 +66,13 @@ async function bootstrap(): Promise<void> {
     "🚀 Starting NEXORA...",
   );
 
+  /*
+   * Fail closed ก่อนเชื่อม DB/Discord
+   * หาก production financial config
+   * ไม่ปลอดภัย
+   */
+  assertMarketplaceFinancialRuntimeSafety();
+
   await connectDatabase();
 
   await commandHandler.loadCommands();
@@ -75,19 +90,16 @@ async function bootstrap(): Promise<void> {
   );
 
   paymentExpirationWorker.start();
+  payoutReconciliationWorker.start();
 
   const apiServer =
     await createApiServer();
 
   const API_HOST =
-    process.env.API_HOST ??
-    "0.0.0.0";
+    env.API_HOST;
 
   const API_PORT =
-    Number(
-      process.env.API_PORT ??
-        3000,
-    );
+    env.API_PORT;
 
   await apiServer.listen({
     host: API_HOST,
@@ -97,6 +109,21 @@ async function bootstrap(): Promise<void> {
   console.log(
     `🌐 NEXORA API listening on ${API_HOST}:${API_PORT}`,
   );
+
+  if (
+    env.NEXORA_PUBLIC_API_URL
+  ) {
+    const publicApi =
+      env.NEXORA_PUBLIC_API_URL
+        .replace(
+          /\/$/,
+          "",
+        );
+
+    console.log(
+      `🔔 Omise webhook target: ${publicApi}/api/v1/webhooks/omise`,
+    );
+  }
 
   await client.login(
     env.DISCORD_TOKEN,
@@ -116,6 +143,9 @@ async function bootstrap(): Promise<void> {
           error,
         );
       }
+
+      paymentExpirationWorker.stop();
+      payoutReconciliationWorker.stop();
 
       client.destroy();
 

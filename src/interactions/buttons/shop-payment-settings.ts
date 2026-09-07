@@ -1,106 +1,73 @@
 import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   EmbedBuilder,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
   type ButtonInteraction,
 } from "discord.js";
 
-import { Shop } from "../../models/Shop.js";
-import { paymentAccountService } from "../../services/paymentAccountService.js";
+import {
+  Shop,
+} from "../../models/Shop.js";
 
 export const customId =
   "nexora_shop_payment_settings";
 
 export async function execute(
-  interaction: ButtonInteraction,
+  interaction:
+    ButtonInteraction,
 ): Promise<void> {
   const shop =
     await Shop.findOne({
-      ownerId: interaction.user.id,
+      ownerId:
+        interaction.user.id,
     });
 
   if (!shop) {
     await interaction.reply({
       content:
         "❌ คุณยังไม่มีร้านค้า",
-      ephemeral: true,
+
+      ephemeral:
+        true,
     });
+
     return;
   }
 
-  const account =
-    await paymentAccountService.getByShopId(
-      shop.shopId,
-    );
-
-  const modal =
-    new ModalBuilder()
-      .setCustomId(
-        "nexora_shop_payment_settings_modal",
+  const embed =
+    new EmbedBuilder()
+      .setColor(
+        0x8b5cf6,
       )
       .setTitle(
-        "💳 ตั้งค่าการรับเงิน",
-      );
-
-  const promptpay =
-    new TextInputBuilder()
-      .setCustomId(
-        "promptpay",
+        "💳 ระบบรับชำระเงินของ NEXORA",
       )
-      .setLabel(
-        "PromptPay",
-      )
-      .setPlaceholder(
-        "เบอร์โทรศัพท์ หรือ PromptPay ID",
-      )
-      .setStyle(
-        TextInputStyle.Short,
-      )
-      .setMaxLength(100)
-      .setValue(
-        account?.promptpay?.account ??
+      .setDescription(
+        [
+          `🏪 **ร้าน:** ${shop.name}`,
           "",
-      )
-      .setRequired(false);
-
-  const truemoney =
-    new TextInputBuilder()
-      .setCustomId(
-        "truemoney",
-      )
-      .setLabel(
-        "TrueMoney",
-      )
-      .setPlaceholder(
-        "เบอร์/ข้อมูลรับเงิน TrueMoney",
-      )
-      .setStyle(
-        TextInputStyle.Short,
-      )
-      .setMaxLength(100)
-      .setValue(
-        account?.truemoney?.account ??
+          "ร้านค้าไม่ต้องตั้ง PromptPay หรือ TrueMoney สำหรับรับเงินจาก Buyer อีกต่อไป",
           "",
+          "✅ ช่องทางชำระเงินถูกกำหนดโดย NEXORA Platform Payment Policy",
+          "✅ ระบบตรวจ Payment Provider capability ก่อนแสดงช่องทาง",
+          "✅ เงินถูกประมวลผลผ่าน merchant account ของ NEXORA",
+          "",
+          "🏦 สำหรับเงินที่ Seller จะได้รับ ให้ใช้เมนู **บัญชีถอนเงิน** แยกต่างหาก",
+          "",
+          "ℹ️ ข้อมูล PaymentAccount รุ่นเก่าจะไม่ถูกใช้เป็นปลายทางของ Charge",
+        ].join(
+          "\n",
+        ),
       )
-      .setRequired(false);
+      .setFooter({
+        text:
+          "NEXORA Marketplace • Platform Payment",
+      });
 
-  modal.addComponents(
-    new ActionRowBuilder<TextInputBuilder>()
-      .addComponents(
-        promptpay,
-      ),
+  await interaction.reply({
+    embeds: [
+      embed,
+    ],
 
-    new ActionRowBuilder<TextInputBuilder>()
-      .addComponents(
-        truemoney,
-      ),
-  );
-
-  await interaction.showModal(
-    modal,
-  );
+    ephemeral:
+      true,
+  });
 }

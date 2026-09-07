@@ -14,15 +14,22 @@ import {
   WebhookEvent,
 } from "../../models/WebhookEvent.js";
 
+import {
+  isSupportedOmiseReconciliationEvent,
+  omiseWebhookReconciliationService,
+} from "../../services/omiseWebhookReconciliationService.js";
+
 interface OmiseWebhookEvent {
   object?: string;
   id?: string;
   key?: string;
+
   data?: {
     id?: string;
     status?: string;
     amount?: number;
     currency?: string;
+
     metadata?: Record<
       string,
       unknown
@@ -38,12 +45,13 @@ interface RawBodyRequest {
   rawBody?: string;
 }
 
+const WEBHOOK_PROCESSING_STALE_MS =
+  5 * 60 * 1000;
+
 export const webhookRoutes:
   FastifyPluginAsync =
   async (app) => {
-    app.post<
-      WebhookRequest
-    >(
+    app.post<WebhookRequest>(
       "/webhooks/omise",
       {
         config: {
@@ -56,7 +64,8 @@ export const webhookRoutes:
       ) => {
         const rawBody =
           (
-            request as typeof request &
+            request as
+              typeof request &
               RawBodyRequest
           ).rawBody;
 
@@ -86,10 +95,12 @@ export const webhookRoutes:
         const valid =
           verifyOmiseWebhookSignature(
             rawBody,
+
             typeof timestamp ===
               "string"
               ? timestamp
               : undefined,
+
             typeof signature ===
               "string"
               ? signature
@@ -101,6 +112,7 @@ export const webhookRoutes:
             .code(401)
             .send({
               success: false,
+
               error:
                 "Invalid Omise webhook signature",
             });
@@ -117,6 +129,7 @@ export const webhookRoutes:
             .code(400)
             .send({
               success: false,
+
               error:
                 "Missing Omise event ID",
             });
@@ -126,12 +139,74 @@ export const webhookRoutes:
           event.key !==
           "charge.complete"
         ) {
+          if (
+            isSupportedOmiseReconciliationEvent(
+              event.key,
+            )
+          ) {
+            if (
+              !event.data?.id
+            ) {
+              return reply
+                .code(400)
+                .send({
+                  success:
+                    false,
+
+                  error:
+                    "Missing Omise resource ID",
+                });
+            }
+
+            try {
+              const result =
+                await omiseWebhookReconciliationService
+                  .process(
+                    event,
+                  );
+
+              if (
+                result.success ===
+                  false &&
+                result.retry ===
+                  true
+              ) {
+                return reply
+                  .code(503)
+                  .send(
+                    result,
+                  );
+              }
+
+              return result;
+            } catch (error) {
+              request.log.error(
+                error,
+              );
+
+              return reply
+                .code(500)
+                .send({
+                  success:
+                    false,
+
+                  error:
+                    error instanceof
+                      Error
+                      ? error.message
+                      : "Webhook reconciliation failed",
+                });
+            }
+          }
+
           return {
             success: true,
             ignored: true,
+
             event:
               event.key ??
               "unknown",
+
             eventId,
           };
         }
@@ -144,6 +219,7 @@ export const webhookRoutes:
             .code(400)
             .send({
               success: false,
+
               error:
                 "Missing Omise charge ID",
             });
@@ -172,57 +248,226 @@ export const webhookRoutes:
             };
           }
 
-          const existing =
+          const now =
+            new Date();
+
+          const staleBefore =
+            new Date(
+              Date.now() -
+                WEBHOOK_PROCESSING_STALE_MS,
+            );
+
+          let webhookEvent: any =
             await WebhookEvent.findOne({
               eventId,
             });
 
-          if (existing) {
+          if (
+            webhookEvent?.status ===
+            "processed"
+          ) {
             return {
               success: true,
               duplicate: true,
               eventId,
               status:
-                existing.status,
+                "processed",
             };
           }
 
-          let webhookEvent;
+          let ownsClaim =
+            false;
 
-          try {
-            webhookEvent =
-              await WebhookEvent.create({
-                eventId,
-                provider:
-                  "omise",
-                paymentId:
-                  payment.paymentId,
-                status:
-                  "processing",
-              });
-          } catch (
-            createError: any
+          if (
+            webhookEvent?.status ===
+            "failed"
           ) {
-            if (
-              createError?.code ===
-              11000
-            ) {
-              const duplicate =
-                await WebhookEvent.findOne({
-                  eventId,
-                });
+            webhookEvent =
+              await WebhookEvent
+                .findOneAndUpdate(
+                  {
+                    eventId,
+                    status:
+                      "failed",
+                  },
+                  {
+                    $set: {
+                      status:
+                        "processing",
 
-              return {
-                success: true,
-                duplicate: true,
-                eventId,
-                status:
-                  duplicate?.status ??
-                  "processing",
-              };
+                      provider:
+                        "omise",
+
+                      paymentId:
+                        payment.paymentId,
+
+                      receivedAt:
+                        now,
+
+                      error:
+                        null,
+                    },
+
+                    $unset: {
+                      processedAt: 1,
+                    },
+                  },
+                  {
+                    new: true,
+                  },
+                );
+
+            if (!webhookEvent) {
+              return reply
+                .code(503)
+                .send({
+                  success: false,
+                  retry: true,
+
+                  error:
+                    "Webhook retry claim conflict",
+                });
             }
 
-            throw createError;
+            ownsClaim =
+              true;
+          } else if (
+            webhookEvent?.status ===
+            "processing"
+          ) {
+            const updatedAt =
+              webhookEvent.updatedAt
+                ? new Date(
+                    webhookEvent.updatedAt,
+                  )
+                : new Date(
+                    webhookEvent.receivedAt,
+                  );
+
+            if (
+              Number.isFinite(
+                updatedAt.getTime(),
+              ) &&
+              updatedAt >
+                staleBefore
+            ) {
+              return reply
+                .code(503)
+                .send({
+                  success: false,
+                  retry: true,
+
+                  error:
+                    "Webhook is already being processed",
+                });
+            }
+
+            const reclaimed =
+              await WebhookEvent
+                .findOneAndUpdate(
+                  {
+                    eventId,
+                    status:
+                      "processing",
+
+                    updatedAt: {
+                      $lte:
+                        staleBefore,
+                    },
+                  },
+                  {
+                    $set: {
+                      provider:
+                        "omise",
+
+                      paymentId:
+                        payment.paymentId,
+
+                      receivedAt:
+                        now,
+
+                      error:
+                        null,
+                    },
+                  },
+                  {
+                    new: true,
+                  },
+                );
+
+            if (!reclaimed) {
+              return reply
+                .code(503)
+                .send({
+                  success: false,
+                  retry: true,
+
+                  error:
+                    "Webhook reclaim conflict",
+                });
+            }
+
+            webhookEvent =
+              reclaimed;
+
+            ownsClaim =
+              true;
+          } else if (!webhookEvent) {
+            try {
+              webhookEvent =
+                await WebhookEvent.create({
+                  eventId,
+
+                  provider:
+                    "omise",
+
+                  paymentId:
+                    payment.paymentId,
+
+                  status:
+                    "processing",
+
+                  receivedAt:
+                    now,
+                });
+
+              ownsClaim =
+                true;
+            } catch (
+              createError: any
+            ) {
+              if (
+                createError?.code ===
+                11000
+              ) {
+                return reply
+                  .code(503)
+                  .send({
+                    success: false,
+                    retry: true,
+
+                    error:
+                      "Webhook event is already being claimed",
+                  });
+              }
+
+              throw createError;
+            }
+          }
+
+          if (
+            !webhookEvent ||
+            !ownsClaim
+          ) {
+            return reply
+              .code(503)
+              .send({
+                success: false,
+                retry: true,
+
+                error:
+                  "Webhook processing claim unavailable",
+              });
           }
 
           try {
@@ -232,40 +477,76 @@ export const webhookRoutes:
                   payment.paymentId,
                 );
 
-            webhookEvent.status =
-              "processed";
+            const processed =
+              await WebhookEvent
+                .findOneAndUpdate(
+                  {
+                    eventId,
+                    status:
+                      "processing",
+                  },
+                  {
+                    $set: {
+                      status:
+                        "processed",
 
-            webhookEvent.processedAt =
-              new Date();
+                      processedAt:
+                        new Date(),
 
-            webhookEvent.error =
-              null;
+                      error:
+                        null,
+                    },
+                  },
+                  {
+                    new: true,
+                  },
+                );
 
-            await webhookEvent.save();
+            if (!processed) {
+              throw new Error(
+                "Webhook processing claim was lost",
+              );
+            }
 
             return {
               success: true,
               processed: true,
+
               paymentId:
                 payment.paymentId,
+
               eventId,
+
               status:
-                result?.status ??
+                result.status ??
                 "unknown",
             };
           } catch (
             processingError
           ) {
-            webhookEvent.status =
-              "failed";
+            await WebhookEvent
+              .findOneAndUpdate(
+                {
+                  eventId,
 
-            webhookEvent.error =
-              processingError instanceof
-              Error
-                ? processingError.message
-                : "Webhook processing failed";
+                  status:
+                    "processing",
+                },
+                {
+                  $set: {
+                    status:
+                      "failed",
 
-            await webhookEvent.save();
+                    error:
+                      processingError
+                        instanceof
+                          Error
+                        ? processingError
+                            .message
+                        : "Webhook processing failed",
+                  },
+                },
+              );
 
             throw processingError;
           }
@@ -278,9 +559,10 @@ export const webhookRoutes:
             .code(500)
             .send({
               success: false,
+
               error:
                 error instanceof
-                Error
+                  Error
                   ? error.message
                   : "Webhook processing failed",
             });

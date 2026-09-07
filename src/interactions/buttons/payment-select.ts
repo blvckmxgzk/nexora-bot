@@ -12,10 +12,6 @@ import {
 } from "../../services/paymentService.js";
 
 import {
-  paymentAccountService,
-} from "../../services/paymentAccountService.js";
-
-import {
   Order,
 } from "../../models/Order.js";
 
@@ -124,19 +120,6 @@ export async function execute(
         },
       );
 
-    const target =
-      await paymentAccountService
-        .getPaymentTarget(
-          order.shopId,
-          provider,
-        );
-
-    if (!target) {
-      throw new Error(
-        "ร้านค้ายังไม่ได้ตั้งค่าบัญชีรับเงิน",
-      );
-    }
-
     const providerName =
       provider ===
       "promptpay"
@@ -223,17 +206,7 @@ export async function execute(
     const row =
       new ActionRowBuilder<ButtonBuilder>()
         .addComponents(
-          new ButtonBuilder()
-            .setCustomId(
-              `nexora_payment_cancel:${payment.paymentId}`,
-            )
-            .setLabel(
-              "ยกเลิกการชำระเงิน",
-            )
-            .setEmoji("❌")
-            .setStyle(
-              ButtonStyle.Danger,
-            ),
+
         );
 
     await interaction.editReply({

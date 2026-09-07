@@ -3,6 +3,7 @@ import { Order } from "../models/Order.js";
 import { Product } from "../models/Product.js";
 import { Shop } from "../models/Shop.js";
 import { isShopOpenAt } from "./shopHoursService.js";
+import { sellerLedgerService } from "./sellerLedgerService.js";
 
 function createOrderId(): string {
   return (
@@ -272,6 +273,10 @@ export const orderService = {
                 data.productId,
               productName:
                 product.name,
+
+              productCategory:
+                product.category,
+
               quantity:
                 data.quantity,
               unitPrice:
@@ -539,6 +544,22 @@ export const orderService = {
               "ไม่พบร้านค้าของคำสั่งซื้อ",
             );
           }
+
+          /*
+           * Credit เงินให้ Seller ภายใน
+           * transaction เดียวกับ:
+           *
+           * - Order -> completed
+           * - Shop.completedOrders +1
+           *
+           * ถ้า Ledger เขียนไม่ได้
+           * ทุกอย่างต้อง rollback
+           */
+          await sellerLedgerService
+            .creditCompletedOrder(
+              order,
+              session,
+            );
 
           completedOrder =
             order;
@@ -896,109 +917,5 @@ export const orderService = {
     }
   },
 
-  async refundOrder(
-    orderId: string,
-    reason: string,
-  ) {
-    const trimmedReason =
-      reason.trim();
 
-    if (!trimmedReason) {
-      throw new Error(
-        "กรุณาระบุเหตุผลในการคืนเงิน",
-      );
-    }
-
-    if (
-      trimmedReason.length >
-      1000
-    ) {
-      throw new Error(
-        "เหตุผลในการคืนเงินต้องไม่เกิน 1000 ตัวอักษร",
-      );
-    }
-
-    const existing =
-      await Order.findOne({
-        orderId,
-      });
-
-    if (!existing) {
-      throw new Error(
-        "ไม่พบคำสั่งซื้อ",
-      );
-    }
-
-    /*
-     * Idempotent:
-     * ถ้าคืนเงินไปแล้ว ให้ส่ง Order เดิมกลับ
-     */
-    if (
-      existing.status ===
-      "refunded"
-    ) {
-      return existing;
-    }
-
-    if (
-      existing.status !==
-        "paid" &&
-      existing.status !==
-        "processing" &&
-      existing.status !==
-        "completed"
-    ) {
-      throw new Error(
-        "คำสั่งซื้อนี้ไม่สามารถคืนเงินได้",
-      );
-    }
-
-    const order =
-      await Order.findOneAndUpdate(
-        {
-          orderId,
-          status: {
-            $in: [
-              "paid",
-              "processing",
-              "completed",
-            ],
-          },
-        },
-        {
-          $set: {
-            status:
-              "refunded",
-            refundedAt:
-              new Date(),
-            refundReason:
-              trimmedReason,
-          },
-        },
-        {
-          returnDocument:
-            "after",
-        },
-      );
-
-    if (!order) {
-      const latest =
-        await Order.findOne({
-          orderId,
-        });
-
-      if (
-        latest?.status ===
-        "refunded"
-      ) {
-        return latest;
-      }
-
-      throw new Error(
-        "คำสั่งซื้อนี้ไม่สามารถคืนเงินได้",
-      );
-    }
-
-    return order;
-  },
 };

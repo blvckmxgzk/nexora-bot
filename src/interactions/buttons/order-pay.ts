@@ -8,7 +8,9 @@ import {
 
 import { Order } from "../../models/Order.js";
 import { Shop } from "../../models/Shop.js";
-import { paymentAccountService } from "../../services/paymentAccountService.js";
+import {
+  platformPaymentCapabilityService,
+} from "../../services/payment/platformPaymentCapabilityService.js";
 
 export const customId =
   "nexora_order_payment:";
@@ -92,27 +94,52 @@ export async function execute(
     return;
   }
 
-  const account =
-    await paymentAccountService.getByShopId(
-      shop.shopId,
+  const productCategory =
+    typeof order.productCategory ===
+      "string"
+      ? order.productCategory
+      : "other";
+
+  let availableMethods:
+    Array<
+      | "promptpay"
+      | "truemoney"
+    >;
+
+  try {
+    availableMethods =
+      await platformPaymentCapabilityService
+        .getAvailableMethods({
+          category:
+            productCategory,
+
+          amountBaht:
+            order.totalAmount,
+        });
+  } catch (error) {
+    console.error(
+      "❌ Payment capability lookup failed:",
+      error,
     );
 
-  if (!account) {
     await interaction.reply({
       content:
-        "❌ ร้านค้านี้ยังไม่ได้ตั้งค่าช่องทางรับเงิน",
+        "❌ ไม่สามารถตรวจสอบช่องทางชำระเงินของ NEXORA ได้ในขณะนี้",
       ephemeral: true,
     });
+
     return;
   }
 
   const hasPromptPay =
-    account.promptpay?.enabled === true &&
-    !!account.promptpay?.account;
+    availableMethods.includes(
+      "promptpay",
+    );
 
   const hasTrueMoney =
-    account.truemoney?.enabled === true &&
-    !!account.truemoney?.account;
+    availableMethods.includes(
+      "truemoney",
+    );
 
   if (
     !hasPromptPay &&
@@ -120,9 +147,10 @@ export async function execute(
   ) {
     await interaction.reply({
       content:
-        "❌ ร้านค้านี้ยังไม่มีช่องทางรับเงินที่พร้อมใช้งาน",
+        "❌ ขณะนี้ไม่มีช่องทางชำระเงินของ NEXORA ที่รองรับสินค้านี้",
       ephemeral: true,
     });
+
     return;
   }
 
@@ -139,13 +167,13 @@ export async function execute(
           `**จำนวน:** ${order.quantity}`,
           `**ยอดชำระ:** ฿${order.totalAmount.toLocaleString("th-TH")}`,
           "",
-          "เลือกช่องทางที่ต้องการชำระเงิน",
+          "เลือกช่องทางที่ NEXORA รองรับสำหรับรายการนี้",
           "",
           "💚 **PromptPay**",
-          "ชำระผ่าน PromptPay ของร้าน",
+          "ชำระผ่าน PromptPay ของ NEXORA Payment Provider",
           "",
           "🟢 **TrueMoney**",
-          "ชำระผ่าน TrueMoney ของร้าน",
+          "ชำระผ่าน TrueMoney ของ NEXORA Payment Provider",
         ].join("\n"),
       )
       .setFooter({

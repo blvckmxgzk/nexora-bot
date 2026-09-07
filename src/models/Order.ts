@@ -43,6 +43,25 @@ const orderSchema =
         maxlength: 100,
       },
 
+      /*
+       * Snapshot category ตอนสร้าง Order
+       *
+       * Payment policy ของ Order ที่สร้างแล้ว
+       * ห้ามเปลี่ยนตาม Product ปัจจุบัน
+       */
+      productCategory: {
+        type: String,
+        enum: [
+          "game_topup",
+          "game_keys",
+          "gift_cards",
+          "digital_services",
+          "other",
+        ],
+        default:
+          "other",
+      },
+
       quantity: {
         type: Number,
         required: true,

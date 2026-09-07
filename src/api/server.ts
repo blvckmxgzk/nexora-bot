@@ -2,8 +2,6 @@ import Fastify from "fastify";
 import fastifyRawBody from "fastify-raw-body";
 
 import { healthRoute } from "./routes/health.js";
-import { orderRoutes } from "./routes/orders.js";
-import { paymentRoutes } from "./routes/payments.js";
 import { webhookRoutes } from "./routes/webhooks.js";
 
 export async function createApiServer() {
@@ -35,20 +33,6 @@ export async function createApiServer() {
 
   await app.register(
     healthRoute,
-    {
-      prefix: "/api/v1",
-    },
-  );
-
-  await app.register(
-    orderRoutes,
-    {
-      prefix: "/api/v1",
-    },
-  );
-
-  await app.register(
-    paymentRoutes,
     {
       prefix: "/api/v1",
     },

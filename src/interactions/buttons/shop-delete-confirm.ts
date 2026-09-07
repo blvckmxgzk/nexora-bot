@@ -3,26 +3,60 @@ import {
   type ButtonInteraction,
 } from "discord.js";
 
-import { env } from "../../config/env.js";
-import { Shop } from "../../models/Shop.js";
-import { shopDraftService } from "../../services/shopDraftService.js";
+import {
+  env,
+} from "../../config/env.js";
+
+import {
+  shopDraftService,
+} from "../../services/shopDraftService.js";
+
+import {
+  shopArchiveService,
+} from "../../services/shopArchiveService.js";
 
 export const customId =
   "nexora_shop_delete_confirm";
 
 export async function execute(
-  interaction: ButtonInteraction,
+  interaction:
+    ButtonInteraction,
 ): Promise<void> {
   await interaction.deferUpdate();
 
-  const shop = await Shop.findOne({
-    ownerId: interaction.user.id,
-  });
+  let archived:
+    Awaited<
+      ReturnType<
+        typeof shopArchiveService.archiveShop
+      >
+    >;
 
-  if (!shop) {
+  /*
+   * Mongo archive ก่อน Discord cleanup
+   *
+   * ถ้า financial preflight fail
+   * ห้ามแตะ Forum / Role
+   */
+  try {
+    archived =
+      await shopArchiveService
+        .archiveShop({
+          ownerId:
+            interaction.user.id,
+
+          actorId:
+            interaction.user.id,
+
+          reason:
+            "Seller requested permanent marketplace archive",
+        });
+  } catch (error) {
     await interaction.editReply({
       content:
-        "❌ ไม่พบร้านค้าของคุณแล้ว",
+        error instanceof Error
+          ? `❌ ${error.message}`
+          : "❌ ไม่สามารถ archive ร้านค้าได้",
+
       embeds: [],
       components: [],
     });
@@ -30,51 +64,65 @@ export async function execute(
     return;
   }
 
-  let forumDeleteFailed = false;
+  const shop =
+    archived.shop;
 
-  // ลบ Forum Thread
-  if (shop.forumThreadId) {
+  let forumDeleteFailed =
+    false;
+
+  /*
+   * Mongo เป็น source of truth แล้ว
+   * Discord cleanup หลังจากนี้เป็น
+   * best-effort side effect
+   */
+  if (
+    archived.forumThreadId
+  ) {
     try {
       const thread =
-        await interaction.client.channels.fetch(
-          shop.forumThreadId,
-        );
+        await interaction.client
+          .channels.fetch(
+            archived.forumThreadId,
+          );
 
       if (
         thread &&
         thread.isThread()
       ) {
         await thread.delete(
-          "NEXORA Marketplace - Permanent shop deletion",
+          "NEXORA Marketplace - Shop financially archived",
         );
       }
     } catch (error) {
-      forumDeleteFailed = true;
+      forumDeleteFailed =
+        true;
 
       console.error(
-        "❌ Failed to delete shop forum thread:",
+        "⚠️ Failed to delete archived Shop forum thread:",
         error,
       );
     }
   }
 
-  // ลบ Seller Roles
   if (interaction.guild) {
     try {
       const member =
-        await interaction.guild.members.fetch(
-          interaction.user.id,
-        );
+        await interaction.guild
+          .members.fetch(
+            interaction.user.id,
+          );
 
       const generalRole =
-        await interaction.guild.roles.fetch(
-          env.GENERAL_SELLER_ROLE_ID,
-        );
+        await interaction.guild
+          .roles.fetch(
+            env.GENERAL_SELLER_ROLE_ID,
+          );
 
       const verifiedRole =
-        await interaction.guild.roles.fetch(
-          env.VERIFIED_SELLER_ROLE_ID,
-        );
+        await interaction.guild
+          .roles.fetch(
+            env.VERIFIED_SELLER_ROLE_ID,
+          );
 
       if (
         generalRole &&
@@ -84,7 +132,8 @@ export async function execute(
       ) {
         await member.roles.remove(
           generalRole,
-          `NEXORA Marketplace - Shop deleted: ${shop.shopId}`,
+
+          `NEXORA Marketplace - Shop archived: ${shop.shopId}`,
         );
       }
 
@@ -96,21 +145,17 @@ export async function execute(
       ) {
         await member.roles.remove(
           verifiedRole,
-          `NEXORA Marketplace - Shop deleted: ${shop.shopId}`,
+
+          `NEXORA Marketplace - Shop archived: ${shop.shopId}`,
         );
       }
     } catch (error) {
       console.error(
-        "⚠️ Failed to remove seller roles:",
+        "⚠️ Failed to remove archived Shop seller roles:",
         error,
       );
     }
   }
-
-  // ลบข้อมูลร้าน
-  await Shop.deleteOne({
-    _id: shop._id,
-  });
 
   shopDraftService.delete(
     interaction.user.id,
@@ -118,38 +163,42 @@ export async function execute(
 
   const embed =
     new EmbedBuilder()
-      .setColor(0x22c55e)
-      .setTitle("🗑️ ลบร้านค้าเรียบร้อย")
+      .setColor(
+        0x6b7280,
+      )
+      .setTitle(
+        "🗄️ Archive ร้านค้าเรียบร้อย",
+      )
       .setDescription(
         [
-          `ร้าน **${shop.name}** ถูกลบออกจากระบบแล้ว`,
+          `ร้าน **${shop.name}** ถูกนำออกจาก Marketplace แล้ว`,
           "",
-          "✅ ลบข้อมูลร้านจาก MongoDB",
-          "✅ ลบกระทู้ Forum",
-          "✅ ลบยศ Seller",
-          "✅ ลบข้อมูลร้านทั้งหมด",
+          "✅ ปิดการรับ Order ใหม่",
+          "✅ เก็บ Shop ID และประวัติทางการเงินไว้",
+          "✅ Order / Payment / Refund / Ledger / Payout เดิมไม่ถูกลบ",
+          "✅ ลบ Seller roles",
+          forumDeleteFailed
+            ? "⚠️ Forum cleanup ไม่สำเร็จ"
+            : "✅ ลบ Forum thread",
           "",
-          "หากต้องการขายสินค้าอีกครั้ง",
-          "สามารถเปิดร้านใหม่ได้จาก Marketplace Panel",
-        ].join("\n"),
+          "💰 หากยังมียอดคงเหลือ คุณยังสามารถจัดการการถอนเงินจากหน้า Shop Management ได้",
+          "",
+          "ร้านที่ archive แล้วจะไม่ถูกเปิดกลับด้วยปุ่ม Reopen เดิม",
+        ].join(
+          "\n",
+        ),
       )
       .setFooter({
         text:
-          "NEXORA Marketplace • Shop Permanently Deleted",
+          "NEXORA Marketplace • Financial History Preserved",
       })
       .setTimestamp();
 
-  if (forumDeleteFailed) {
-    embed.addFields({
-      name: "⚠️ ไม่สามารถลบ Forum ได้",
-      value:
-        "ข้อมูลร้านถูกลบจาก MongoDB แล้ว แต่ Bot ไม่มีสิทธิ์ลบกระทู้ Forum",
-    });
-  }
-
   await interaction.editReply({
     content: "",
-    embeds: [embed],
+    embeds: [
+      embed,
+    ],
     components: [],
   });
 }

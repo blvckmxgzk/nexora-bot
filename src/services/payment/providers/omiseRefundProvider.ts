@@ -20,6 +20,16 @@ function getSecretKey(): string {
     );
   }
 
+  if (
+    !key.startsWith(
+      "skey_test_",
+    )
+  ) {
+    throw new Error(
+      "Live Omise key ถูกบล็อก: NEXORA ยังอยู่ใน Pre-Live mode",
+    );
+  }
+
   return key;
 }
 

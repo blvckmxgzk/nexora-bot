@@ -52,8 +52,31 @@ export const shopService = {
         status: "pending",
       });
 
-    await shop.save();
+    try {
+      await shop.save();
 
-    return shop;
+      return shop;
+    } catch (error: any) {
+      if (
+        error?.code ===
+        11000
+      ) {
+        const existingAfterRace =
+          await Shop.findOne({
+            ownerId:
+              data.ownerId,
+          });
+
+        if (
+          existingAfterRace
+        ) {
+          throw new Error(
+            "คุณมีร้านค้าอยู่แล้ว",
+          );
+        }
+      }
+
+      throw error;
+    }
   },
 };

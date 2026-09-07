@@ -4,7 +4,11 @@ import mongoose from "mongoose";
 import { Refund } from "../models/Refund.js";
 import { Order } from "../models/Order.js";
 import { Payment } from "../models/Payment.js";
-import { omiseRefundProvider } from "./payment/providers/omiseRefundProvider.js";
+import {
+  refundProviderRegistry,
+  resolveRefundProviderName,
+} from "./payment/refundProviderRegistry.js";
+import { sellerLedgerService } from "./sellerLedgerService.js";
 
 function generateRefundId(): string {
   return `NXR-${crypto
@@ -168,7 +172,9 @@ export const refundService = {
                 order.sellerId,
 
               provider:
-                "omise",
+                resolveRefundProviderName(
+                  payment.provider,
+                ),
 
               providerPaymentId:
                 payment.providerPaymentId,
@@ -353,6 +359,17 @@ export const refundService = {
       refund.status ===
       "completed"
     ) {
+      /*
+       * Refund ฝั่ง Provider อาจสำเร็จแล้ว
+       * แต่ Order / Payment reconciliation
+       * รอบก่อนอาจล้มเหลว
+       *
+       * completed จึงต้อง reconcile ซ้ำได้
+       */
+      await reconcileRefundState(
+        refund,
+      );
+
       return refund;
     }
 
@@ -399,6 +416,33 @@ export const refundService = {
     }
 
     /*
+     * ตรวจ Payment method ก่อนแตะ Refund API
+     *
+     * Omise PromptPay ไม่รองรับ
+     * provider-side refund/void
+     */
+    const originalPayment =
+      await Payment.findOne({
+        paymentId:
+          refund.paymentId,
+      });
+
+    if (!originalPayment) {
+      throw new Error(
+        "ไม่พบ Payment ต้นทางของ Refund",
+      );
+    }
+
+    if (
+      originalPayment.provider ===
+      "promptpay"
+    ) {
+      throw new Error(
+        "PromptPay ไม่รองรับการคืนเงินอัตโนมัติผ่าน Omise กรุณาดำเนินการคืนเงินแบบ Manual",
+      );
+    }
+
+    /*
      * ก่อนสร้าง Refund ใหม่:
      *
      * ตรวจสอบกับ Omise ก่อนว่า Refund
@@ -411,8 +455,13 @@ export const refundService = {
      * - worker retry
      * - เกิด Refund ซ้ำ
      */
+    const refundProvider =
+      refundProviderRegistry.get(
+        refund.provider,
+      );
+
     const existingProviderRefund =
-      await omiseRefundProvider.findExistingRefund({
+      await refundProvider.findExistingRefund({
         providerPaymentId:
           refund.providerPaymentId,
 
@@ -555,7 +604,7 @@ export const refundService = {
        * เพราะเป็น external network operation
        */
       const result =
-        await omiseRefundProvider
+        await refundProvider
           .createRefund({
             providerPaymentId:
               processingRefund.providerPaymentId,
@@ -769,6 +818,18 @@ async function reconcileRefundState(
             "ไม่พบ Order สำหรับ Refund",
           );
         }
+
+        /*
+         * ถ้า Order เคย completed และ credit
+         * Seller ไปแล้ว ต้อง debit กลับ
+         * ภายใน transaction เดียวกับ
+         * Order + Payment -> refunded
+         */
+        await sellerLedgerService
+          .debitRefundIfCredited(
+            currentRefund,
+            session,
+          );
 
         if (
           order.status !==

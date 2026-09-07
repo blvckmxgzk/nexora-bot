@@ -183,17 +183,7 @@ export async function execute(
               ButtonStyle.Success,
             ),
 
-          new ButtonBuilder()
-            .setCustomId(
-              `nexora_payment_cancel:${result.paymentId}`,
-            )
-            .setLabel(
-              "ยกเลิก",
-            )
-            .setEmoji("❌")
-            .setStyle(
-              ButtonStyle.Danger,
-            ),
+
         );
 
     const embed =

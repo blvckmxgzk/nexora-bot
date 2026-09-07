@@ -6,7 +6,14 @@ export interface CreatePaymentInput {
   paymentId: string;
   orderId: string;
   amount: number;
-  account: string;
+
+  /**
+   * @deprecated
+   * Legacy seller payment target.
+   * Platform checkout must not use this field.
+   */
+  account?: string;
+
   expiresAt: Date;
   provider: PaymentProviderName;
 }
@@ -18,6 +25,7 @@ export interface PaymentCreationResult {
   paymentUrl?: string | null;
   qrData?: string | null;
   instructions?: string | null;
+  expiresAt?: Date | null;
 }
 
 export interface PaymentVerificationResult {
@@ -26,6 +34,8 @@ export interface PaymentVerificationResult {
   paidAt?: Date | null;
   amount?: number | null;
   currency?: string | null;
+  status?: string | null;
+  expiresAt?: Date | null;
 }
 
 export interface PaymentProvider {
@@ -34,6 +44,10 @@ export interface PaymentProvider {
   createPayment(
     input: CreatePaymentInput,
   ): Promise<PaymentCreationResult>;
+
+  findExistingPayment?(
+    input: CreatePaymentInput,
+  ): Promise<PaymentCreationResult | null>;
 
   verifyPayment(
     providerPaymentId: string,

@@ -8,8 +8,8 @@ import {
 
 import { Shop } from "../../models/Shop.js";
 import { Order } from "../../models/Order.js";
-import { paymentAccountService } from "../../services/paymentAccountService.js";
 import { isShopOpenAt } from "../../services/shopHoursService.js";
+import { sellerLedgerService } from "../../services/sellerLedgerService.js";
 
 export const customId =
   "nexora_shop_manage";
@@ -33,16 +33,111 @@ export async function execute(
     return;
   }
 
+  /*
+   * Financially archived Shop:
+   *
+   * ห้ามแสดง operational controls เช่น
+   * edit product / reopen / payment settings
+   *
+   * แต่ Seller ต้องยังถอนยอดคงเหลือได้
+   */
+  if (shop.deletedAt) {
+    const balanceSatang =
+      await sellerLedgerService
+        .getAvailableBalanceSatang(
+          interaction.user.id,
+        );
+
+    const financialRow =
+      new ActionRowBuilder<ButtonBuilder>()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(
+              "nexora_shop_payout_account",
+            )
+            .setLabel(
+              "บัญชีถอนเงิน",
+            )
+            .setEmoji("🏦")
+            .setStyle(
+              ButtonStyle.Secondary,
+            ),
+
+          new ButtonBuilder()
+            .setCustomId(
+              "nexora_shop_payout_request",
+            )
+            .setLabel(
+              "ถอนเงิน TEST",
+            )
+            .setEmoji("💸")
+            .setStyle(
+              ButtonStyle.Success,
+            ),
+        );
+
+    const embed =
+      new EmbedBuilder()
+        .setColor(
+          0x6b7280,
+        )
+        .setTitle(
+          `🗄️ ร้านถูก Archive • ${shop.name}`,
+        )
+        .setDescription(
+          [
+            `**Shop ID:** \`${shop.shopId}\``,
+            "",
+            "ร้านนี้ถูกนำออกจาก Marketplace แล้ว",
+            "แต่ข้อมูลทางการเงินถูกเก็บไว้เพื่อ audit และ settlement",
+            "",
+            `**ยอดคงเหลือ:** ฿${(
+              balanceSatang /
+              100
+            ).toFixed(2)}`,
+            "",
+            `**Archive เมื่อ:** ${new Date(
+              shop.deletedAt,
+            ).toLocaleString(
+              "th-TH",
+              {
+                timeZone:
+                  "Asia/Bangkok",
+              },
+            )}`,
+            "",
+            "สามารถใช้เฉพาะเครื่องมือทางการเงินด้านล่าง",
+          ].join(
+            "\n",
+          ),
+        )
+        .setFooter({
+          text:
+            "NEXORA Marketplace • Financial Archive",
+        })
+        .setTimestamp();
+
+    await interaction.reply({
+      embeds: [
+        embed,
+      ],
+
+      components: [
+        financialRow,
+      ],
+
+      ephemeral:
+        true,
+    });
+
+    return;
+  }
+
   const orders =
     await Order.countDocuments({
       shopId:
         shop.shopId,
     });
-
-  const account =
-    await paymentAccountService.getByShopId(
-      shop.shopId,
-    );
 
   const shopStatus =
     isShopOpenAt(shop);
@@ -63,29 +158,12 @@ export async function execute(
       "⚫ ปิดร้าน",
   };
 
-  const hasPromptPay =
-    account?.promptpay?.enabled ===
-      true &&
-    !!account.promptpay?.account;
-
-  const hasTrueMoney =
-    account?.truemoney?.enabled ===
-      true &&
-    !!account.truemoney?.account;
-
   const paymentText =
     [
-      hasPromptPay
-        ? "💚 PromptPay"
-        : null,
-
-      hasTrueMoney
-        ? "🟢 TrueMoney"
-        : null,
-    ]
-      .filter(Boolean)
-      .join("\n") ||
-    "❌ ยังไม่ได้ตั้งค่า";
+      "💳 NEXORA Platform Payment",
+      "ช่องทางที่ Buyer เห็นขึ้นอยู่กับ Provider capability และ Category Policy",
+      "บัญชี PromptPay/TrueMoney ส่วนตัวของ Seller ไม่ได้ใช้เป็นปลายทาง Charge",
+    ].join("\n");
 
   const businessHoursText =
     shopStatus.schedule
@@ -173,7 +251,7 @@ export async function execute(
             "nexora_shop_payment_settings",
           )
           .setLabel(
-            "ช่องทางรับเงิน",
+            "การรับชำระเงิน",
           )
           .setEmoji("💳")
           .setStyle(
@@ -194,6 +272,30 @@ export async function execute(
           .setEmoji("🕐")
           .setStyle(
             ButtonStyle.Primary,
+          ),
+
+        new ButtonBuilder()
+          .setCustomId(
+            "nexora_shop_payout_account",
+          )
+          .setLabel(
+            "บัญชีถอนเงิน",
+          )
+          .setEmoji("🏦")
+          .setStyle(
+            ButtonStyle.Secondary,
+          ),
+
+        new ButtonBuilder()
+          .setCustomId(
+            "nexora_shop_payout_request",
+          )
+          .setLabel(
+            "ถอนเงิน TEST",
+          )
+          .setEmoji("💸")
+          .setStyle(
+            ButtonStyle.Success,
           ),
       );
 

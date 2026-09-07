@@ -52,6 +52,7 @@ const paymentSchema = new Schema(
     status: {
       type: String,
       enum: [
+        "creating",
         "pending",
         "paid",
         "expired",

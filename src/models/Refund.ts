@@ -151,6 +151,32 @@ const refundSchema =
     },
   );
 
+
+refundSchema.index(
+  {
+    orderId: 1,
+  },
+  {
+    unique: true,
+
+    name:
+      "uniq_effective_refund_per_order",
+
+    partialFilterExpression: {
+      status: {
+        $in: [
+          "requested",
+          "approved",
+          "processing",
+          "failed",
+          "completed",
+        ],
+      },
+    },
+  },
+);
+
+
 export const Refund =
   model(
     "Refund",

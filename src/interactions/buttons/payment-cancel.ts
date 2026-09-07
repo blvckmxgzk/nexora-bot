@@ -1,9 +1,10 @@
 import {
-  EmbedBuilder,
   type ButtonInteraction,
 } from "discord.js";
 
-import { paymentService } from "../../services/paymentService.js";
+import {
+  paymentService,
+} from "../../services/paymentService.js";
 
 export const customId =
   "nexora_payment_cancel:";
@@ -20,71 +21,71 @@ export async function execute(
         "❌ Payment ID ไม่ถูกต้อง",
       ephemeral: true,
     });
+
     return;
   }
 
-  try {
-    const payment =
-      await paymentService.getByPaymentId(
-        paymentId,
-      );
-
-    if (!payment) {
-      await interaction.reply({
-        content:
-          "❌ ไม่พบ Payment",
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (
-      payment.buyerId !==
-      interaction.user.id
-    ) {
-      await interaction.reply({
-        content:
-          "❌ คุณไม่มีสิทธิ์ยกเลิก Payment นี้",
-        ephemeral: true,
-      });
-      return;
-    }
-
-    await paymentService.cancelPayment(
+  const payment =
+    await paymentService.getByPaymentId(
       paymentId,
     );
 
-    const embed =
-      new EmbedBuilder()
-        .setColor(0xed4245)
-        .setTitle(
-          "❌ ยกเลิกการชำระเงินแล้ว",
-        )
-        .setDescription(
-          [
-            `🧾 **Order ID:** \`${payment.orderId}\``,
-            `💳 **Payment ID:** \`${payment.paymentId}\``,
-            "",
-            "Stock ที่ถูกกันไว้สำหรับคำสั่งซื้อนี้จะถูกคืนตามระบบ Order",
-          ].join("\n"),
-        )
-        .setFooter({
-          text:
-            "NEXORA Marketplace • Payment Cancelled",
-        })
-        .setTimestamp();
-
-    await interaction.update({
-      embeds: [embed],
-      components: [],
-    });
-  } catch (error) {
+  if (!payment) {
     await interaction.reply({
       content:
-        error instanceof Error
-          ? `❌ ${error.message}`
-          : "❌ ไม่สามารถยกเลิก Payment ได้",
+        "❌ ไม่พบ Payment",
       ephemeral: true,
     });
+
+    return;
   }
+
+  if (
+    payment.buyerId !==
+    interaction.user.id
+  ) {
+    await interaction.reply({
+      content:
+        "❌ คุณไม่มีสิทธิ์ดำเนินการกับ Payment นี้",
+      ephemeral: true,
+    });
+
+    return;
+  }
+
+  if (
+    payment.status !==
+    "pending"
+  ) {
+    await interaction.reply({
+      content:
+        `ℹ️ Payment นี้อยู่ในสถานะ \`${payment.status}\` แล้ว`,
+      ephemeral: true,
+    });
+
+    return;
+  }
+
+  const expiresAt =
+    payment.expiresAt
+      instanceof Date
+      ? payment.expiresAt
+      : new Date(
+          payment.expiresAt,
+        );
+
+  const timestamp =
+    Math.floor(
+      expiresAt.getTime() /
+        1000,
+    );
+
+  await interaction.reply({
+    content:
+      "⚠️ ไม่สามารถยกเลิก Payment หลังจากสร้าง QR แล้วได้\n\n" +
+      "QR จาก Payment Provider อาจยังสามารถใช้ชำระเงินจริงได้ " +
+      "ดังนั้นระบบจะไม่คืน Stock จนกว่า Provider จะยืนยันว่ารายการหมดอายุ\n\n" +
+      `⏰ หมดอายุประมาณ <t:${timestamp}:R>`,
+    ephemeral: true,
+  });
 }

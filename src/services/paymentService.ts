@@ -6,8 +6,8 @@ import { Shop } from "../models/Shop.js";
 import { Product } from "../models/Product.js";
 
 import {
-  paymentAccountService,
-} from "./paymentAccountService.js";
+  platformPaymentCapabilityService,
+} from "./payment/platformPaymentCapabilityService.js";
 
 import {
   paymentProviderRegistry,
@@ -24,6 +24,193 @@ import {
 import {
   sendSellerOrderPaidDM,
 } from "./marketplace/sellerOrderNotificationService.js";
+
+async function finalizeFailedPayment(
+  paymentId: string,
+) {
+  const session =
+    await mongoose.startSession();
+
+  let failedPayment: any =
+    null;
+
+  try {
+    await session.withTransaction(
+      async () => {
+        const payment =
+          await Payment.findOne({
+            paymentId,
+          }).session(session);
+
+        if (!payment) {
+          throw new Error(
+            "ไม่พบ Payment",
+          );
+        }
+
+        if (
+          payment.status ===
+          "failed"
+        ) {
+          failedPayment =
+            payment;
+          return;
+        }
+
+        if (
+          payment.status !==
+          "pending"
+        ) {
+          throw new Error(
+            `ไม่สามารถเปลี่ยน Payment สถานะ ${payment.status} เป็น failed ได้`,
+          );
+        }
+
+        const order =
+          await Order.findOne({
+            orderId:
+              payment.orderId,
+          }).session(session);
+
+        if (!order) {
+          throw new Error(
+            "ไม่พบ Order ที่ผูกกับ Payment",
+          );
+        }
+
+        if (
+          order.status !==
+            "awaiting_payment" ||
+          order.paymentId !==
+            payment.paymentId
+        ) {
+          throw new Error(
+            `Order ${order.orderId} ไม่อยู่ในสถานะ awaiting_payment`,
+          );
+        }
+
+        const now =
+          new Date();
+
+        const updatedPayment =
+          await Payment
+            .findOneAndUpdate(
+              {
+                paymentId,
+                status:
+                  "pending",
+              },
+              {
+                $set: {
+                  status:
+                    "failed",
+                },
+              },
+              {
+                new: true,
+                session,
+              },
+            );
+
+        if (!updatedPayment) {
+          throw new Error(
+            "Payment ถูกเปลี่ยนสถานะก่อน finalize failed",
+          );
+        }
+
+        const updatedOrder =
+          await Order
+            .findOneAndUpdate(
+              {
+                orderId:
+                  order.orderId,
+
+                status:
+                  "awaiting_payment",
+
+                paymentId:
+                  payment.paymentId,
+
+                "metadata.stockReserved":
+                  true,
+
+                "metadata.stockReleased":
+                  {
+                    $ne: true,
+                  },
+              },
+              {
+                $set: {
+                  status:
+                    "cancelled",
+
+                  cancelledAt:
+                    now,
+
+                  cancelReason:
+                    "Payment Provider แจ้งว่าการชำระเงินล้มเหลว",
+
+                  "metadata.stockReserved":
+                    false,
+
+                  "metadata.stockReleased":
+                    true,
+                },
+              },
+              {
+                new: true,
+                session,
+              },
+            );
+
+        if (!updatedOrder) {
+          throw new Error(
+            "ไม่สามารถปิด Order หลัง Payment failed ได้",
+          );
+        }
+
+        const stockResult =
+          await Product.updateOne(
+            {
+              productId:
+                updatedOrder.productId,
+            },
+            {
+              $inc: {
+                stock:
+                  updatedOrder.quantity,
+              },
+            },
+            {
+              session,
+            },
+          );
+
+        if (
+          stockResult.matchedCount !==
+          1
+        ) {
+          throw new Error(
+            `ไม่พบ Product สำหรับคืน Stock: ${updatedOrder.productId}`,
+          );
+        }
+
+        failedPayment =
+          updatedPayment;
+      },
+    );
+
+    if (!failedPayment) {
+      throw new Error(
+        "Payment failed finalization ไม่ได้ผลลัพธ์",
+      );
+    }
+
+    return failedPayment;
+  } finally {
+    await session.endSession();
+  }
+}
 
 export const paymentService = {
   async getByPaymentId(
@@ -59,7 +246,8 @@ export const paymentService = {
   }) {
     const order =
       await Order.findOne({
-        orderId: data.orderId,
+        orderId:
+          data.orderId,
       });
 
     if (!order) {
@@ -68,8 +256,11 @@ export const paymentService = {
       );
     }
 
+    const paymentOrder =
+      order;
+
     if (
-      order.buyerId !==
+      paymentOrder.buyerId !==
       data.buyerId
     ) {
       throw new Error(
@@ -77,29 +268,10 @@ export const paymentService = {
       );
     }
 
-    if (
-      order.status !==
-      "pending"
-    ) {
-      const existing =
-        await Payment.findOne({
-          orderId:
-            data.orderId,
-          status: "pending",
-        });
-
-      if (existing) {
-        return existing;
-      }
-
-      throw new Error(
-        "คำสั่งซื้อนี้ไม่พร้อมสำหรับการชำระเงิน",
-      );
-    }
-
     const shop =
       await Shop.findOne({
-        shopId: order.shopId,
+        shopId:
+          order.shopId,
       });
 
     if (!shop) {
@@ -117,23 +289,427 @@ export const paymentService = {
       );
     }
 
-    const paymentTarget =
-      await paymentAccountService
-        .getPaymentTarget(
-          shop.shopId,
-          data.provider,
-        );
-
-    if (!paymentTarget) {
-      throw new Error(
-        "ร้านค้ายังไม่ได้ตั้งค่าบัญชีรับเงินสำหรับช่องทางนี้",
-      );
-    }
-
     const provider =
       paymentProviderRegistry.get(
         data.provider,
       );
+
+    let paymentPolicyCategory:
+      string |
+      null =
+        null;
+
+    async function resolveExisting(
+      payment: any,
+    ) {
+      if (
+        payment.provider !==
+        data.provider
+      ) {
+        throw new Error(
+          `คำสั่งซื้อนี้มี Payment ช่องทาง ${payment.provider} อยู่แล้ว`,
+        );
+      }
+
+      if (
+        payment.status ===
+        "pending"
+      ) {
+        return payment;
+      }
+
+      if (
+        payment.status !==
+        "creating"
+      ) {
+        throw new Error(
+          `Payment นี้อยู่ในสถานะ ${payment.status} และไม่สามารถสร้างใหม่ได้`,
+        );
+      }
+
+      const hasCreationError =
+        typeof payment.metadata
+          ?.creationLastError ===
+          "string" &&
+        payment.metadata
+          .creationLastError
+          .trim()
+          .length > 0;
+
+      /*
+       * ถ้า owner request ยังไม่มี error:
+       * อาจกำลังคุยกับ Provider อยู่จริง
+       * จึงรอ local finalize ก่อนเล็กน้อย
+       *
+       * แต่ถ้ามี creationLastError แล้ว
+       * แปลว่า request ก่อนหน้าจบแบบ ambiguous
+       * จึงเข้า recovery search ได้ทันที
+       */
+      if (!hasCreationError) {
+        for (
+          let attempt = 0;
+          attempt < 25;
+          attempt++
+        ) {
+          await new Promise<void>(
+            (resolve) => {
+              setTimeout(
+                resolve,
+                200,
+              );
+            },
+          );
+
+          const current =
+            await Payment.findOne({
+              paymentId:
+                payment.paymentId,
+            });
+
+          if (!current) {
+            throw new Error(
+              "Payment ที่กำลังสร้างหายไปจากระบบ",
+            );
+          }
+
+          if (
+            current.status ===
+            "pending"
+          ) {
+            return current;
+          }
+
+          if (
+            current.status !==
+            "creating"
+          ) {
+            throw new Error(
+              `Payment ถูกเปลี่ยนเป็นสถานะ ${current.status}`,
+            );
+          }
+
+          payment =
+            current;
+        }
+      }
+
+      /*
+       * ถ้า request owner ตายหลัง Omise สร้าง Charge
+       * แต่ก่อน local finalize:
+       * ค้น Charge เดิมจาก metadata
+       *
+       * สำคัญ: ถ้าหาไม่เจอ ห้ามสร้าง Charge ใหม่
+       */
+      if (
+        !provider.findExistingPayment
+      ) {
+        throw new Error(
+          "Payment กำลังอยู่ระหว่างการตรวจสอบ กรุณาลองใหม่ภายหลัง",
+        );
+      }
+
+      const recovered =
+        await provider
+          .findExistingPayment({
+            paymentId:
+              payment.paymentId,
+
+            orderId:
+              paymentOrder.orderId,
+
+            amount:
+              paymentOrder.totalAmount,
+
+            provider:
+              data.provider,
+
+            expiresAt:
+              payment.expiresAt,
+          });
+
+      if (!recovered) {
+        throw new Error(
+          "Payment อยู่ระหว่างการตรวจสอบกับ Payment Provider ระบบจะไม่สร้าง QR ซ้ำเพื่อป้องกันการชำระเงินซ้ำ",
+        );
+      }
+
+      return finalizeCreation(
+        payment.paymentId,
+        recovered,
+      );
+    }
+
+    async function finalizeCreation(
+      paymentId: string,
+      providerPayment: {
+        provider:
+          | "promptpay"
+          | "truemoney";
+        providerPaymentId: string;
+        paymentReference: string;
+        paymentUrl?: string | null;
+        qrData?: string | null;
+        instructions?: string | null;
+        expiresAt?: Date | null;
+      },
+    ) {
+      if (
+        !providerPayment
+          .providerPaymentId
+      ) {
+        throw new Error(
+          "Payment Provider ไม่ได้ส่ง Payment ID กลับมา",
+        );
+      }
+
+      if (
+        providerPayment.provider !==
+        data.provider
+      ) {
+        throw new Error(
+          "Payment Provider ที่ตอบกลับมาไม่ตรงกับช่องทางที่เลือก",
+        );
+      }
+
+      const session =
+        await mongoose.startSession();
+
+      let finalized: any =
+        null;
+
+      try {
+        await session.withTransaction(
+          async () => {
+            const current =
+              await Payment.findOne({
+                paymentId,
+              }).session(session);
+
+            if (!current) {
+              throw new Error(
+                "ไม่พบ Payment สำหรับ finalize",
+              );
+            }
+
+            if (
+              current.status ===
+              "pending"
+            ) {
+              if (
+                current.providerPaymentId !==
+                providerPayment
+                  .providerPaymentId
+              ) {
+                throw new Error(
+                  "Payment ถูกผูกกับ Provider Charge อื่นแล้ว",
+                );
+              }
+
+              finalized =
+                current;
+
+              return;
+            }
+
+            if (
+              current.status !==
+              "creating"
+            ) {
+              throw new Error(
+                `Payment สถานะ ${current.status} ไม่สามารถ finalize การสร้างได้`,
+              );
+            }
+
+            const currentOrder =
+              await Order.findOne({
+                orderId:
+                  current.orderId,
+              }).session(session);
+
+            if (!currentOrder) {
+              throw new Error(
+                "ไม่พบ Order สำหรับ Payment",
+              );
+            }
+
+            if (
+              currentOrder.status !==
+                "awaiting_payment" ||
+              currentOrder.paymentId !==
+                current.paymentId
+            ) {
+              throw new Error(
+                "Order ไม่ได้ถือ Payment creation claim นี้แล้ว",
+              );
+            }
+
+            const providerExpiresAt =
+              providerPayment
+                  .expiresAt
+                instanceof Date &&
+              Number.isFinite(
+                providerPayment
+                  .expiresAt
+                  .getTime(),
+              )
+                ? providerPayment
+                    .expiresAt
+                : current.expiresAt;
+
+            const updatedPayment =
+              await Payment
+                .findOneAndUpdate(
+                  {
+                    paymentId,
+                    status:
+                      "creating",
+                  },
+                  {
+                    $set: {
+                      status:
+                        "pending",
+
+                      providerPaymentId:
+                        providerPayment
+                          .providerPaymentId,
+
+                      expiresAt:
+                        providerExpiresAt,
+
+                      "metadata.paymentReference":
+                        providerPayment
+                          .paymentReference,
+
+                      "metadata.paymentUrl":
+                        providerPayment
+                          .paymentUrl ??
+                        null,
+
+                      "metadata.qrData":
+                        providerPayment
+                          .qrData ??
+                        null,
+
+                      "metadata.instructions":
+                        providerPayment
+                          .instructions ??
+                        null,
+
+                      "metadata.collectionRouting":
+                        "platform_merchant",
+
+                      "metadata.creationLastError":
+                        null,
+                    },
+                  },
+                  {
+                    new: true,
+                    session,
+                  },
+                );
+
+            if (!updatedPayment) {
+              throw new Error(
+                "ไม่สามารถ finalize Payment creation ได้",
+              );
+            }
+
+            const updatedOrder =
+              await Order
+                .findOneAndUpdate(
+                  {
+                    orderId:
+                      currentOrder
+                        .orderId,
+
+                    status:
+                      "awaiting_payment",
+
+                    paymentId:
+                      current.paymentId,
+                  },
+                  {
+                    $set: {
+                      paymentMethod:
+                        data.provider,
+
+                      paymentExpiresAt:
+                        providerExpiresAt,
+                    },
+                  },
+                  {
+                    new: true,
+                    session,
+                  },
+                );
+
+            if (!updatedOrder) {
+              throw new Error(
+                "ไม่สามารถ finalize Order payment state ได้",
+              );
+            }
+
+            finalized =
+              updatedPayment;
+          },
+        );
+
+        if (!finalized) {
+          throw new Error(
+            "Payment creation finalization ไม่ได้ผลลัพธ์",
+          );
+        }
+
+        return finalized;
+      } finally {
+        await session.endSession();
+      }
+    }
+
+    const existingBeforeClaim =
+      await Payment.findOne({
+        orderId:
+          order.orderId,
+      });
+
+    if (existingBeforeClaim) {
+      return resolveExisting(
+        existingBeforeClaim,
+      );
+    }
+
+    if (
+      order.status !==
+      "pending"
+    ) {
+      throw new Error(
+        "คำสั่งซื้อนี้ไม่พร้อมสำหรับการชำระเงิน",
+      );
+    }
+
+    /*
+     * Payment policy ใช้ snapshot จาก Order
+     *
+     * ห้ามอ่าน category จาก Product ปัจจุบัน
+     * เพราะ Seller อาจแก้ Product หลังสร้าง Order
+     */
+    paymentPolicyCategory =
+      typeof order.productCategory ===
+        "string"
+        ? order.productCategory
+        : "other";
+
+    await platformPaymentCapabilityService
+      .assertMethodAllowed({
+        provider:
+          data.provider,
+
+        category:
+          paymentPolicyCategory,
+
+        amountBaht:
+          order.totalAmount,
+      });
 
     const paymentId =
       `PAY-${Date.now()}-` +
@@ -148,116 +724,282 @@ export const paymentService = {
           15 * 60 * 1000,
       );
 
-    const providerPayment =
-      await provider.createPayment({
-        paymentId,
-        orderId:
-          order.orderId,
-        amount:
-          order.totalAmount,
-        account:
-          paymentTarget.account,
-        provider:
-          data.provider,
-        expiresAt,
-      });
+    const session =
+      await mongoose.startSession();
+
+    let claimedPayment: any =
+      null;
+
+    let ownsClaim =
+      false;
 
     try {
-      const payment =
-        new Payment({
-          paymentId,
-          orderId:
-            order.orderId,
-          buyerId:
-            order.buyerId,
-          sellerId:
-            order.sellerId,
-          shopId:
-            order.shopId,
-          provider:
-            data.provider,
-          amount:
-            order.totalAmount,
-          status: "pending",
-          providerPaymentId:
-            providerPayment.providerPaymentId,
-          expiresAt,
-          metadata: {
-            paymentReference:
-              providerPayment.paymentReference,
-            paymentUrl:
-              providerPayment.paymentUrl ??
-              null,
-            qrData:
-              providerPayment.qrData ??
-              null,
-            instructions:
-              providerPayment.instructions ??
-              null,
-            account:
-              paymentTarget.account,
-            displayName:
-              paymentTarget.displayName ??
-              null,
-          },
-        });
+      try {
+        await session.withTransaction(
+          async () => {
+            const currentOrder =
+              await Order.findOne({
+                orderId:
+                  order.orderId,
+              }).session(session);
 
-      await payment.save();
+            if (!currentOrder) {
+              throw new Error(
+                "ไม่พบคำสั่งซื้อ",
+              );
+            }
 
-      const updatedOrder =
-        await Order.findOneAndUpdate(
-          {
-            orderId:
-              order.orderId,
-            status: "pending",
-          },
-          {
-            $set: {
-              status:
-                "awaiting_payment",
-              paymentMethod:
-                data.provider,
-              paymentId:
-                payment.paymentId,
-              paymentExpiresAt:
-                payment.expiresAt,
-            },
-          },
-          {
-            returnDocument:
-              "after",
+            if (
+              currentOrder.buyerId !==
+              data.buyerId
+            ) {
+              throw new Error(
+                "คุณไม่มีสิทธิ์ชำระคำสั่งซื้อนี้",
+              );
+            }
+
+            const existing =
+              await Payment.findOne({
+                orderId:
+                  currentOrder.orderId,
+              }).session(session);
+
+            if (existing) {
+              claimedPayment =
+                existing;
+
+              return;
+            }
+
+            if (
+              currentOrder.status !==
+              "pending"
+            ) {
+              throw new Error(
+                "คำสั่งซื้อนี้ไม่พร้อมสำหรับการชำระเงิน",
+              );
+            }
+
+            /*
+             * Re-read snapshot ภายใน transaction
+             * เพื่อป้องกัน Order ถูกเปลี่ยนระหว่าง
+             * policy evaluation กับ payment claim
+             */
+            const currentCategory =
+              typeof currentOrder
+                .productCategory ===
+                "string"
+                ? currentOrder
+                    .productCategory
+                : "other";
+
+            if (
+              currentCategory !==
+              paymentPolicyCategory
+            ) {
+              throw new Error(
+                "Payment policy snapshot ของ Order ถูกเปลี่ยนระหว่างสร้าง Payment",
+              );
+            }
+
+            const payment =
+              new Payment({
+                paymentId,
+
+                orderId:
+                  currentOrder.orderId,
+
+                buyerId:
+                  currentOrder.buyerId,
+
+                sellerId:
+                  currentOrder.sellerId,
+
+                shopId:
+                  currentOrder.shopId,
+
+                provider:
+                  data.provider,
+
+                amount:
+                  currentOrder.totalAmount,
+
+                status:
+                  "creating",
+
+                providerPaymentId:
+                  null,
+
+                expiresAt,
+
+                metadata: {
+                  collectionRouting:
+                    "platform_merchant",
+
+                  productCategory:
+                    paymentPolicyCategory,
+
+                  paymentPolicy:
+                    "platform_capability_v1",
+
+                  creationClaimedAt:
+                    new Date(),
+
+                  creationLastError:
+                    null,
+                },
+              });
+
+            await payment.save({
+              session,
+            });
+
+            const updatedOrder =
+              await Order
+                .findOneAndUpdate(
+                  {
+                    orderId:
+                      currentOrder
+                        .orderId,
+
+                    status:
+                      "pending",
+                  },
+                  {
+                    $set: {
+                      status:
+                        "awaiting_payment",
+
+                      paymentMethod:
+                        data.provider,
+
+                      paymentId:
+                        payment.paymentId,
+
+                      paymentExpiresAt:
+                        expiresAt,
+                    },
+                  },
+                  {
+                    new: true,
+                    session,
+                  },
+                );
+
+            if (!updatedOrder) {
+              throw new Error(
+                "Order ถูกเปลี่ยนสถานะก่อน claim Payment",
+              );
+            }
+
+            claimedPayment =
+              payment;
+
+            ownsClaim =
+              true;
           },
         );
+      } catch (error: any) {
+        if (
+          error?.code !==
+          11000
+        ) {
+          throw error;
+        }
 
-      if (!updatedOrder) {
-        await Payment.deleteOne({
-          paymentId:
-            payment.paymentId,
-        });
-
-        throw new Error(
-          "คำสั่งซื้อถูกเปลี่ยนสถานะก่อนสร้าง Payment เสร็จ",
-        );
-      }
-
-      return payment;
-    } catch (error: any) {
-      if (
-        error?.code === 11000
-      ) {
-        const existing =
+        claimedPayment =
           await Payment.findOne({
             orderId:
               order.orderId,
-            status: "pending",
           });
 
-        if (existing) {
-          return existing;
+        if (!claimedPayment) {
+          throw error;
         }
+
+        ownsClaim =
+          false;
       }
 
-      throw error;
+      if (!claimedPayment) {
+        throw new Error(
+          "ไม่สามารถ claim Payment creation ได้",
+        );
+      }
+
+      if (!ownsClaim) {
+        return resolveExisting(
+          claimedPayment,
+        );
+      }
+
+      let providerPayment;
+
+      try {
+        providerPayment =
+          await provider
+            .createPayment({
+              paymentId:
+                claimedPayment
+                  .paymentId,
+
+              orderId:
+                order.orderId,
+
+              amount:
+                order.totalAmount,
+
+              provider:
+                data.provider,
+
+              expiresAt:
+                claimedPayment
+                  .expiresAt,
+            });
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Payment Provider creation failed";
+
+        /*
+         * ห้าม rollback claim แล้วสร้าง Charge ใหม่ทันที
+         *
+         * network error อาจเกิดหลัง Provider
+         * สร้าง Charge สำเร็จแล้ว
+         */
+        await Payment.updateOne(
+          {
+            paymentId:
+              claimedPayment
+                .paymentId,
+
+            status:
+              "creating",
+          },
+          {
+            $set: {
+              "metadata.creationLastError":
+                message.slice(
+                  0,
+                  2000,
+                ),
+
+              "metadata.creationLastAttemptAt":
+                new Date(),
+            },
+          },
+        );
+
+        throw error;
+      }
+
+      return finalizeCreation(
+        claimedPayment.paymentId,
+        providerPayment,
+      );
+    } finally {
+      await session.endSession();
     }
   },
 
@@ -495,6 +1237,7 @@ export const paymentService = {
   async markPaid(
     paymentId: string,
     providerPaymentId: string,
+    providerPaidAt?: Date | null,
   ) {
     const session = await mongoose.startSession();
 
@@ -527,13 +1270,23 @@ export const paymentService = {
           );
         }
 
-        const now = new Date();
+        const now =
+          new Date();
 
-        if (payment.expiresAt <= now) {
-          throw new Error(
-            "Payment นี้หมดอายุแล้ว",
-          );
-        }
+        /*
+         * ห้าม reject Payment จากเวลาปัจจุบัน
+         *
+         * Provider อาจยืนยัน successful หลังจาก
+         * webhook มาถึงช้า ทั้งที่ลูกค้าจ่ายทันเวลา
+         */
+        const paidAt =
+          providerPaidAt instanceof
+              Date &&
+          Number.isFinite(
+            providerPaidAt.getTime(),
+          )
+            ? providerPaidAt
+            : now;
 
         const order = await Order.findOne({
           orderId: payment.orderId,
@@ -563,15 +1316,12 @@ export const paymentService = {
             {
               paymentId,
               status: "pending",
-              expiresAt: {
-                $gt: now,
-              },
             },
             {
               $set: {
                 status: "paid",
                 providerPaymentId,
-                paidAt: now,
+                paidAt,
               },
             },
             {
@@ -722,42 +1472,288 @@ export const paymentService = {
   async expirePayment(
     paymentId: string,
   ) {
-    const payment =
-      await Payment.findOneAndUpdate(
-        {
-          paymentId,
-          status: "pending",
-          expiresAt: {
-            $lte: new Date(),
-          },
-        },
-        {
-          $set: {
-            status: "expired",
-          },
-        },
-        {
-          returnDocument:
-            "after",
+    const session =
+      await mongoose.startSession();
+
+    let expiredPayment: any =
+      null;
+
+    try {
+      await session.withTransaction(
+        async () => {
+          const payment =
+            await Payment.findOne({
+              paymentId,
+            }).session(session);
+
+          if (!payment) {
+            throw new Error(
+              "ไม่พบ Payment",
+            );
+          }
+
+          /*
+           * Concurrent paid / failed / cancelled
+           * อาจชนะ transaction นี้ไปแล้ว
+           */
+          if (
+            payment.status !==
+              "pending" &&
+            payment.status !==
+              "expired"
+          ) {
+            expiredPayment =
+              payment;
+
+            return;
+          }
+
+          const order =
+            await Order.findOne({
+              orderId:
+                payment.orderId,
+            }).session(session);
+
+          if (!order) {
+            throw new Error(
+              "ไม่พบ Order ที่ผูกกับ Payment",
+            );
+          }
+
+          /*
+           * รองรับ repair จาก state รุ่นเก่า:
+           * Order ถูก cancel + คืน Stock แล้ว
+           * แต่ Payment ยัง pending
+           */
+          if (
+            order.status ===
+              "cancelled" &&
+            order.metadata
+              ?.stockReleased ===
+              true
+          ) {
+            if (
+              payment.status ===
+              "pending"
+            ) {
+              const repaired =
+                await Payment
+                  .findOneAndUpdate(
+                    {
+                      paymentId,
+                      status:
+                        "pending",
+                    },
+                    {
+                      $set: {
+                        status:
+                          "expired",
+                      },
+                    },
+                    {
+                      new: true,
+                      session,
+                    },
+                  );
+
+              expiredPayment =
+                repaired ??
+                payment;
+            } else {
+              expiredPayment =
+                payment;
+            }
+
+            return;
+          }
+
+          if (
+            order.status !==
+              "awaiting_payment" ||
+            order.paymentId !==
+              payment.paymentId
+          ) {
+            throw new Error(
+              `Order ${order.orderId} ไม่อยู่ในสถานะ awaiting_payment`,
+            );
+          }
+
+          let finalPayment =
+            payment;
+
+          if (
+            payment.status ===
+            "pending"
+          ) {
+            const updatedPayment =
+              await Payment
+                .findOneAndUpdate(
+                  {
+                    paymentId,
+                    status:
+                      "pending",
+                  },
+                  {
+                    $set: {
+                      status:
+                        "expired",
+                    },
+                  },
+                  {
+                    new: true,
+                    session,
+                  },
+                );
+
+            if (!updatedPayment) {
+              const latest =
+                await Payment.findOne({
+                  paymentId,
+                }).session(session);
+
+              if (
+                latest &&
+                latest.status !==
+                  "pending"
+              ) {
+                expiredPayment =
+                  latest;
+
+                return;
+              }
+
+              throw new Error(
+                "Payment ถูกเปลี่ยนสถานะก่อน expire",
+              );
+            }
+
+            finalPayment =
+              updatedPayment;
+          }
+
+          const now =
+            new Date();
+
+          const updatedOrder =
+            await Order
+              .findOneAndUpdate(
+                {
+                  orderId:
+                    order.orderId,
+
+                  status:
+                    "awaiting_payment",
+
+                  paymentId:
+                    payment.paymentId,
+
+                  "metadata.stockReserved":
+                    true,
+
+                  "metadata.stockReleased":
+                    {
+                      $ne: true,
+                    },
+                },
+                {
+                  $set: {
+                    status:
+                      "cancelled",
+
+                    cancelledAt:
+                      now,
+
+                    cancelReason:
+                      "Payment Provider ยืนยันว่ารายการหมดอายุแล้ว",
+
+                    "metadata.stockReserved":
+                      false,
+
+                    "metadata.stockReleased":
+                      true,
+                  },
+                },
+                {
+                  new: true,
+                  session,
+                },
+              );
+
+          if (!updatedOrder) {
+            const latestOrder =
+              await Order.findOne({
+                orderId:
+                  order.orderId,
+              }).session(session);
+
+            if (
+              latestOrder?.status ===
+                "cancelled" &&
+              latestOrder.metadata
+                ?.stockReleased ===
+                true
+            ) {
+              expiredPayment =
+                finalPayment;
+
+              return;
+            }
+
+            throw new Error(
+              "ไม่สามารถ expire Order ได้",
+            );
+          }
+
+          const stockResult =
+            await Product.updateOne(
+              {
+                productId:
+                  updatedOrder.productId,
+              },
+              {
+                $inc: {
+                  stock:
+                    updatedOrder.quantity,
+                },
+              },
+              {
+                session,
+              },
+            );
+
+          if (
+            stockResult.matchedCount !==
+            1
+          ) {
+            throw new Error(
+              `ไม่พบ Product สำหรับคืน Stock: ${updatedOrder.productId}`,
+            );
+          }
+
+          if (
+            stockResult.modifiedCount !==
+            1
+          ) {
+            throw new Error(
+              `ไม่สามารถคืน Stock ของ Product: ${updatedOrder.productId}`,
+            );
+          }
+
+          expiredPayment =
+            finalPayment;
         },
       );
 
-    if (!payment) {
-      return Payment.findOne({
-        paymentId,
-      });
+      if (!expiredPayment) {
+        throw new Error(
+          "Payment expiration ไม่ได้ผลลัพธ์",
+        );
+      }
+
+      return expiredPayment;
+    } finally {
+      await session.endSession();
     }
-
-    const { orderService } =
-      await import(
-        "./orderService.js"
-      );
-
-    await orderService.expireOrder(
-      payment.orderId,
-    );
-
-    return payment;
   },
 
   async verifyPayment(
@@ -782,15 +1778,6 @@ export const paymentService = {
     }
 
     if (
-      payment.expiresAt <=
-      new Date()
-    ) {
-      return this.expirePayment(
-        paymentId,
-      );
-    }
-
-    if (
       !payment.providerPaymentId
     ) {
       throw new Error(
@@ -803,48 +1790,122 @@ export const paymentService = {
         payment.provider,
       );
 
+    /*
+     * Provider เป็น source of truth
+     *
+     * ห้าม expire จาก local clock
+     * ก่อนถาม Omise
+     */
     const result =
       await provider.verifyPayment(
         payment.providerPaymentId,
       );
 
-    if (!result.paid) {
-      return payment;
-    }
+    const providerStatus =
+      result.status
+        ?.trim()
+        .toLowerCase() ??
+      null;
 
     if (
-      result.amount == null ||
-      Math.abs(
-        result.amount -
-          payment.amount,
-      ) > 0.001
-    ) {
-      throw new Error(
-        "ยอดเงินจาก Payment Provider ไม่ตรงกับยอดคำสั่งซื้อ",
-      );
-    }
-
-    if (
-      result.currency !==
-      "THB"
-    ) {
-      throw new Error(
-        "สกุลเงินของ Payment Provider ไม่ถูกต้อง",
-      );
-    }
-
-    if (
+      result.providerPaymentId &&
       result.providerPaymentId !==
-      payment.providerPaymentId
+        payment.providerPaymentId
     ) {
       throw new Error(
         "Provider Payment ID ไม่ตรงกับ Payment",
       );
     }
 
-    return this.markPaid(
-      payment.paymentId,
-      result.providerPaymentId,
+    if (result.paid) {
+      if (
+        result.providerPaymentId !==
+        payment.providerPaymentId
+      ) {
+        throw new Error(
+          "Provider Payment ID ไม่ตรงกับ Payment",
+        );
+      }
+
+      if (
+        result.amount == null ||
+        !Number.isFinite(
+          result.amount,
+        )
+      ) {
+        throw new Error(
+          "Payment Provider ไม่ได้ส่งยอดเงินที่ถูกต้อง",
+        );
+      }
+
+      const providerSatang =
+        Math.round(
+          result.amount * 100,
+        );
+
+      const expectedSatang =
+        Math.round(
+          payment.amount * 100,
+        );
+
+      if (
+        providerSatang !==
+        expectedSatang
+      ) {
+        throw new Error(
+          "ยอดเงินจาก Payment Provider ไม่ตรงกับยอดคำสั่งซื้อ",
+        );
+      }
+
+      if (
+        typeof result.currency !==
+          "string" ||
+        result.currency
+          .toUpperCase() !==
+          "THB"
+      ) {
+        throw new Error(
+          "สกุลเงินของ Payment Provider ไม่ถูกต้อง",
+        );
+      }
+
+      return this.markPaid(
+        payment.paymentId,
+        payment.providerPaymentId,
+        result.paidAt,
+      );
+    }
+
+    if (
+      providerStatus ===
+      "expired"
+    ) {
+      return this.expirePayment(
+        payment.paymentId,
+      );
+    }
+
+    if (
+      providerStatus ===
+      "failed"
+    ) {
+      return finalizeFailedPayment(
+        payment.paymentId,
+      );
+    }
+
+    if (
+      providerStatus ===
+        "pending" ||
+      providerStatus ===
+        null
+    ) {
+      return payment;
+    }
+
+    throw new Error(
+      `สถานะ Payment Provider ไม่รองรับ: ${providerStatus}`,
     );
   },
+
 };

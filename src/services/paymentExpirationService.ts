@@ -1,58 +1,62 @@
-import { Payment } from "../models/Payment.js";
-import { orderService } from "./orderService.js";
+import {
+  Payment,
+} from "../models/Payment.js";
+
+import {
+  paymentService,
+} from "./paymentService.js";
 
 export const paymentExpirationService = {
   async expirePayments(): Promise<number> {
-    const now = new Date();
-
     const payments =
       await Payment.find({
         status: "pending",
+
         expiresAt: {
-          $lte: now,
+          $lte: new Date(),
         },
-      }).limit(100);
+      })
+        .sort({
+          expiresAt: 1,
+        })
+        .limit(100);
 
-    let expiredCount = 0;
+    let closedCount =
+      0;
 
-    for (const payment of payments) {
+    for (
+      const payment
+      of payments
+    ) {
       try {
-        const locked =
-          await Payment.findOneAndUpdate(
-            {
-              _id: payment._id,
-              status: "pending",
-              expiresAt: {
-                $lte: now,
-              },
-            },
-            {
-              $set: {
-                status: "expired",
-              },
-            },
-            {
-              new: true,
-            },
+        /*
+         * ห้ามเปลี่ยน Payment เป็น expired
+         * จาก local clock โดยตรง
+         *
+         * paymentService.verifyPayment()
+         * ต้องตรวจ Provider ก่อน
+         */
+        const result =
+          await paymentService.verifyPayment(
+            payment.paymentId,
           );
 
-        if (!locked) {
-          continue;
+        if (
+          result.status ===
+            "expired" ||
+          result.status ===
+            "failed"
+        ) {
+          closedCount++;
         }
-
-        await orderService.expireOrder(
-          payment.orderId,
-        );
-
-        expiredCount++;
       } catch (error) {
         console.error(
-          `❌ Failed to expire payment ${payment.paymentId}:`,
+          `❌ Failed to verify expiring Payment ${payment.paymentId}:`,
           error,
         );
       }
     }
 
-    return expiredCount;
+    return closedCount;
   },
 };

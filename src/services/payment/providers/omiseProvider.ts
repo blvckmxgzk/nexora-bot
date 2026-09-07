@@ -56,6 +56,16 @@ function getSecretKey(): string {
     );
   }
 
+  if (
+    !value.startsWith(
+      "skey_test_",
+    )
+  ) {
+    throw new Error(
+      "Live Omise key ถูกบล็อก: NEXORA ยังอยู่ใน Pre-Live mode",
+    );
+  }
+
   return value;
 }
 
@@ -221,6 +231,33 @@ export class OmiseProvider
       ),
     );
 
+    /*
+     * Recovery identity:
+     * ใช้ค้น Charge เดิมหาก process ตายหลัง Omise
+     * สร้าง Charge แล้ว แต่ก่อน Mongo finalize
+     */
+    body.set(
+      "metadata[nexora_payment_id]",
+      input.paymentId,
+    );
+
+    body.set(
+      "metadata[nexora_order_id]",
+      input.orderId,
+    );
+
+    body.set(
+      "metadata[nexora_provider]",
+      this.resolveProvider(
+        input,
+      ),
+    );
+
+    body.set(
+      "description",
+      `NEXORA ${input.orderId}`,
+    );
+
     const charge =
       await omiseRequest<OmiseChargeResponse>(
         "/charges",
@@ -247,6 +284,13 @@ export class OmiseProvider
         ?.reference_number_1 ??
       charge.id;
 
+    const providerExpiresAt =
+      charge.expires_at
+        ? new Date(
+            charge.expires_at,
+          )
+        : null;
+
     return {
       provider:
         this.resolveProvider(
@@ -258,9 +302,144 @@ export class OmiseProvider
         reference,
       paymentUrl,
       qrData: qrUrl,
+
+      expiresAt:
+        providerExpiresAt &&
+        Number.isFinite(
+          providerExpiresAt.getTime(),
+        )
+          ? providerExpiresAt
+          : null,
+
       instructions:
         sourceType ===
         "promptpay"
+          ? "เปิดแอปธนาคารและสแกน QR PromptPay เพื่อชำระเงิน"
+          : "เปิดแอป TrueMoney และสแกน QR เพื่อชำระเงิน",
+    };
+  }
+
+  async findExistingPayment(
+    input: CreatePaymentInput,
+  ): Promise<PaymentCreationResult | null> {
+    const query =
+      new URLSearchParams({
+        scope:
+          "charge",
+
+        query:
+          input.paymentId,
+
+        page:
+          "1",
+
+        per_page:
+          "100",
+      });
+
+    const search =
+      await omiseRequest<{
+        data?: Array<
+          OmiseChargeResponse & {
+            metadata?: Record<
+              string,
+              unknown
+            >;
+          }
+        >;
+      }>(
+        `/search?${query.toString()}`,
+      );
+
+    const expectedAmount =
+      toSatang(
+        input.amount,
+      );
+
+    const expectedProvider =
+      this.resolveProvider(
+        input,
+      );
+
+    const charge =
+      search.data?.find(
+        (candidate) => {
+          const metadata =
+            candidate.metadata;
+
+          return (
+            metadata
+              ?.nexora_payment_id ===
+              input.paymentId &&
+            metadata
+              ?.nexora_order_id ===
+              input.orderId &&
+            metadata
+              ?.nexora_provider ===
+              expectedProvider &&
+            candidate.amount ===
+              expectedAmount &&
+            candidate.currency
+              ?.toUpperCase() ===
+              "THB"
+          );
+        },
+      );
+
+    if (!charge) {
+      return null;
+    }
+
+    const qrUrl =
+      charge.source
+        ?.scannable_code
+        ?.image
+        ?.download_uri ??
+      null;
+
+    const paymentUrl =
+      charge.authorize_uri ??
+      null;
+
+    const reference =
+      charge.source
+        ?.provider_references
+        ?.reference_number_1 ??
+      charge.id;
+
+    const providerExpiresAt =
+      charge.expires_at
+        ? new Date(
+            charge.expires_at,
+          )
+        : null;
+
+    return {
+      provider:
+        expectedProvider,
+
+      providerPaymentId:
+        charge.id,
+
+      paymentReference:
+        reference,
+
+      paymentUrl,
+
+      qrData:
+        qrUrl,
+
+      expiresAt:
+        providerExpiresAt &&
+        Number.isFinite(
+          providerExpiresAt.getTime(),
+        )
+          ? providerExpiresAt
+          : null,
+
+      instructions:
+        expectedProvider ===
+          "promptpay"
           ? "เปิดแอปธนาคารและสแกน QR PromptPay เพื่อชำระเงิน"
           : "เปิดแอป TrueMoney และสแกน QR เพื่อชำระเงิน",
     };
@@ -276,22 +455,44 @@ export class OmiseProvider
         )}`,
       );
 
+    const providerExpiresAt =
+      charge.expires_at
+        ? new Date(
+            charge.expires_at,
+          )
+        : null;
+
     return {
       paid:
         charge.status ===
         "successful",
+
+      status:
+        charge.status,
+
       providerPaymentId:
         charge.id,
+
       paidAt:
         charge.paid_at
           ? new Date(
               charge.paid_at,
             )
           : null,
+
       amount:
         charge.amount / 100,
+
       currency:
         charge.currency,
+
+      expiresAt:
+        providerExpiresAt &&
+        Number.isFinite(
+          providerExpiresAt.getTime(),
+        )
+          ? providerExpiresAt
+          : null,
     };
   }
 
