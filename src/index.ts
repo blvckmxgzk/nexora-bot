@@ -63,6 +63,9 @@ import {
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    ...(process.env.NEXORA_GUILD_MEMBERS_INTENT === "true"
+      ? [GatewayIntentBits.GuildMembers]
+      : []),
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.AutoModerationConfiguration,
