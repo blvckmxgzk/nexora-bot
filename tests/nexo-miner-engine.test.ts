@@ -166,7 +166,7 @@ describe(
     );
 
     it(
-      "creates 100kg starter bag",
+      "creates 300kg starter bag",
       async () => {
         await minerService
           .createProfile(
@@ -184,7 +184,7 @@ describe(
             ?.stats
             .maxWeight
             .eq(
-              100,
+              300,
             ),
         ).toBe(
           true,

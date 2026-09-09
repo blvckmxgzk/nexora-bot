@@ -7,6 +7,10 @@ export type MinerBoostStat =
   | "power"
   | "size"
   | "sell"
+  | "speed"
+  | "xp"
+  | "drop"
+  | "mutation"
   | "all";
 
 export interface MinerItemDefinition {
@@ -58,6 +62,11 @@ export interface MinerItemDefinition {
 
     permanent?:
       boolean;
+
+    timeWarpSeconds?: number;
+    maxWeightLevels?: number;
+    chestSlots?: number;
+    prestigeStars?: number;
   };
 }
 
@@ -132,6 +141,21 @@ export const MINER_ITEM_CATALOG:
   boost("gold_elixir_mythic", "Mythic Golden Elixir", "mythic", "sell", 10, 600, "1e18", "2e18", 750_000),
   boost("gold_elixir_divine", "Divine Golden Elixir", "divine", "sell", 30, 420, "1e25", "2e25", 3_000_000),
   boost("gold_elixir_cosmic", "Cosmic Golden Elixir", "cosmic", "sell", 100, 300, "1e40", "2e40", 30_000_000),
+
+  boost("haste_potion_minor", "Minor Mining Haste", "uncommon", "speed", 1.5, 900, "5e3", "1e4", 7_500),
+  boost("haste_potion_super", "Super Mining Haste", "rare", "speed", 2.25, 900, "5e5", "1e6", 18_000),
+  boost("haste_potion_ultra", "Ultra Mining Haste", "epic", "speed", 4, 600, "5e8", "1e9", 50_000),
+  boost("knowledge_potion_minor", "Minor Knowledge Potion", "uncommon", "xp", 1.5, 1200, "8e3", "1.5e4", 8_000),
+  boost("knowledge_potion_super", "Super Knowledge Potion", "rare", "xp", 2.5, 900, "8e5", "1.5e6", 20_000),
+  boost("knowledge_potion_ultra", "Ultra Knowledge Potion", "epic", "xp", 5, 600, "8e8", "1.5e9", 60_000),
+  boost("treasure_potion_minor", "Minor Treasure Potion", "rare", "drop", 1.5, 900, "1e6", "2e6", 25_000),
+  boost("treasure_potion_super", "Super Treasure Potion", "epic", "drop", 3, 600, "1e9", "2e9", 75_000),
+  boost("treasure_potion_ultra", "Ultra Treasure Potion", "legendary", "drop", 7.5, 420, "1e13", "2e13", 250_000),
+
+  boost("mutation_potion_minor", "Minor Mutation Chance Potion", "rare", "mutation", 2, 1200, "1e6", "2e6", 30_000),
+  boost("mutation_potion_super", "Super Mutation Chance Potion", "epic", "mutation", 5, 900, "1e9", "2e9", 100_000),
+  boost("mutation_potion_ultra", "Ultra Mutation Chance Potion", "legendary", "mutation", 12, 600, "1e14", "2e14", 350_000),
+  boost("mutation_potion_omega", "Omega Mutation Chance Potion", "mythic", "mutation", 30, 420, "1e20", "3e20", 1_500_000),
 
   boost("omni_potion", "Omni Potion", "mythic", "all", 3, 300, "1e20", "3e20", 1_000_000),
   boost("divine_omni", "Divine Omni Potion", "divine", "all", 10, 240, "1e28", "3e28", 5_000_000),
@@ -256,6 +280,7 @@ export const MINER_ITEM_CATALOG:
     shopPrice: "2e10",
     tradeable: true,
     miningDropDenominator: 150_000,
+    effect: { chestSlots: 5 },
   },
   {
     id: "ore_lock_charm",
@@ -323,6 +348,21 @@ export const MINER_ITEM_CATALOG:
     tradeable: true,
     miningDropDenominator: 2_000_000_000,
   },
+  { id:"time_warp_15m", name:"Time Warp — 15m", emoji:"⏳", rarity:"rare", type:"utility", netWorth:"5e5", shopPrice:"1e6", tradeable:true, miningDropDenominator:30_000, effect:{timeWarpSeconds:900} },
+  { id:"time_warp_1h", name:"Time Warp — 1h", emoji:"⏳", rarity:"epic", type:"utility", netWorth:"5e8", shopPrice:"1e9", tradeable:true, miningDropDenominator:100_000, effect:{timeWarpSeconds:3600} },
+  { id:"backpack_core", name:"Backpack Core", emoji:"🎒", rarity:"epic", type:"special", netWorth:"2e9", shopPrice:"4e9", tradeable:true, miningDropDenominator:120_000, effect:{maxWeightLevels:5} },
+  { id:"prestige_token", name:"Prestige Token", emoji:"⭐", rarity:"legendary", type:"special", netWorth:"1e14", shopPrice:null, tradeable:false, miningDropDenominator:500_000, effect:{prestigeStars:1} },
+  { id:"ore_magnet", name:"Ore Magnet", emoji:"🧲", rarity:"rare", type:"special", netWorth:"5e7", shopPrice:"1e8", tradeable:true, miningDropDenominator:60_000 },
+  { id:"lucky_ticket", name:"Lucky Ticket", emoji:"🎟️", rarity:"rare", type:"special", netWorth:"8e7", shopPrice:"1.5e8", tradeable:true, miningDropDenominator:75_000 },
+  { id:"rare_chest_key", name:"Rare Chest Key", emoji:"🗝️", rarity:"epic", type:"special", netWorth:"1e10", shopPrice:"2e10", tradeable:true, miningDropDenominator:150_000 },
+  { id:"mythic_key", name:"Mythic Key", emoji:"🔑", rarity:"mythic", type:"special", netWorth:"1e19", shopPrice:null, tradeable:true, miningDropDenominator:900_000 },
+  { id:"fortune_gem", name:"Fortune Gem", emoji:"💎", rarity:"legendary", type:"material", netWorth:"2e15", shopPrice:null, tradeable:true, miningDropDenominator:350_000 },
+  { id:"merchant_charm", name:"Merchant Charm", emoji:"💰", rarity:"legendary", type:"material", netWorth:"3e15", shopPrice:null, tradeable:true, miningDropDenominator:400_000 },
+  { id:"quantum_battery", name:"Quantum Battery", emoji:"⚡", rarity:"mythic", type:"material", netWorth:"2e20", shopPrice:null, tradeable:true, miningDropDenominator:1_200_000 },
+  { id:"enchant_crystal", name:"Pickaxe Enchant Crystal", emoji:"✨", rarity:"mythic", type:"material", netWorth:"3e20", shopPrice:null, tradeable:true, miningDropDenominator:1_500_000 },
+  { id:"mutation_crystal", name:"Mutation Crystal", emoji:"🧬", rarity:"ancient", type:"material", netWorth:"2e23", shopPrice:null, tradeable:true, miningDropDenominator:2_500_000 },
+  { id:"ultra_fragment", name:"Ultra Fragment", emoji:"🔥", rarity:"transcendent", type:"material", netWorth:"1e56", shopPrice:null, tradeable:true, miningDropDenominator:30_000_000 },
+  { id:"infinity_fragment", name:"Infinity Fragment", emoji:"∞", rarity:"infinite", type:"material", netWorth:"1e125", shopPrice:null, tradeable:true, miningDropDenominator:600_000_000 },
 ];
 
 export const MINER_ITEM_MAP =

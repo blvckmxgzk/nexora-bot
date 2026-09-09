@@ -94,6 +94,14 @@ const minerProfileSchema =
         required: true,
       },
 
+      minerLevel: { type: Number, default: 1, min: 1, index: true },
+      minerXp: { type: String, default: "0", required: true },
+      highestMinerLevel: { type: Number, default: 1, min: 1 },
+      prestigeCount: { type: Number, default: 0, min: 0 },
+      prestigeStars: { type: Number, default: 0, min: 0 },
+      ultraPrestigeCount: { type: Number, default: 0, min: 0 },
+      ultraCores: { type: Number, default: 0, min: 0 },
+
 
       pendingLootRolls: {
         type: Number,

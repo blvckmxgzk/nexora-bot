@@ -114,12 +114,12 @@ describe(
     );
 
     it(
-      "has 72 ores",
+      "has 120 ores",
       () => {
         expect(
           ORE_CATALOG,
         ).toHaveLength(
-          72,
+          120,
         );
       },
     );

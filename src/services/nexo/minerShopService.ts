@@ -40,12 +40,9 @@ function transactionId() {
 export const minerShopService = {
   getCatalog() {
     return MINER_ITEM_CATALOG
-      .filter(
-        (
-          item,
-        ) =>
-          item.shopPrice !==
-          null,
+      .filter((item) => item.shopPrice !== null)
+      .sort((a, b) =>
+        new NexoNumber(a.shopPrice!).cmp(b.shopPrice!),
       );
   },
 

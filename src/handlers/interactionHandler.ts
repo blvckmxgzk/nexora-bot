@@ -6,6 +6,12 @@ import type {
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import {
+  runtimeModuleRoot,
+  runtimeModuleExtension,
+} from "../utils/runtimeModuleLoader.js";
+
+
 import { CommandHandler } from "./commandHandler.js";
 
 import {
@@ -39,7 +45,7 @@ export class InteractionHandler {
   ): Promise<void> {
     const interactionsPath = join(
       process.cwd(),
-      "dist",
+      runtimeModuleRoot,
       "interactions",
     );
 
@@ -120,7 +126,11 @@ export class InteractionHandler {
         continue;
       }
 
-      if (!entry.name.endsWith(".js")) {
+      if (
+        !entry.name.endsWith(
+          runtimeModuleExtension,
+        )
+      ) {
         continue;
       }
 
@@ -347,9 +357,14 @@ export class InteractionHandler {
         return;
       }
 
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+
       const response = {
         content:
-          "❌ เกิดข้อผิดพลาดขณะประมวลผล",
+          `❌ **ไม่สามารถดำเนินการได้**\n${errorMessage.slice(0, 1800)}`,
         ephemeral: true,
       };
 

@@ -2,6 +2,12 @@ import type { Client } from "discord.js";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import {
+  runtimeModuleRoot,
+  runtimeModuleExtension,
+} from "../utils/runtimeModuleLoader.js";
+
+
 export interface NEXORAEvent {
   name: string;
   once?: boolean;
@@ -14,7 +20,7 @@ export class EventHandler {
   public async loadEvents(client: Client): Promise<void> {
     const eventsPath = join(
       process.cwd(),
-      "dist",
+      runtimeModuleRoot,
       "events",
     );
 
@@ -37,7 +43,11 @@ export class EventHandler {
         continue;
       }
 
-      if (!entry.name.endsWith(".js")) {
+      if (
+        !entry.name.endsWith(
+          runtimeModuleExtension,
+        )
+      ) {
         continue;
       }
 

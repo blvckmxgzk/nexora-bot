@@ -1,254 +1,41 @@
-import {
-  NexoNumber,
-} from "./NexoNumber.js";
 
-import {
-  PICKAXE_MAP,
-} from "../../game/nexoMiner/pickaxeCatalog.js";
+import { NexoNumber } from "./NexoNumber.js";
+import { PICKAXE_MAP } from "../../game/nexoMiner/pickaxeCatalog.js";
+import { minerProgressionService } from "./minerProgressionService.js";
 
-export type MinerUpgrade =
-  | "power"
-  | "luck"
-  | "maxweight"
-  | "sellmulti"
-  | "sizemulti";
-
+export type MinerUpgrade = "power"|"luck"|"maxweight"|"sellmulti"|"sizemulti";
 const UPGRADE_CONFIG = {
-  power: {
-    basePrice:
-      "1e3",
-
-    factor:
-      1.55,
-
-    curve:
-      1,
-
-    effect:
-      1.28,
-  },
-
-  luck: {
-    basePrice:
-      "5e3",
-
-    factor:
-      1.65,
-
-    curve:
-      1,
-
-    effect:
-      1.22,
-  },
-
-  maxweight: {
-    basePrice:
-      "2e3",
-
-    factor:
-      1.5,
-
-    curve:
-      0.8,
-
-    effect:
-      1.35,
-  },
-
-  sellmulti: {
-    basePrice:
-      "2e4",
-
-    factor:
-      1.75,
-
-    curve:
-      1.15,
-
-    effect:
-      1.15,
-  },
-
-  sizemulti: {
-    basePrice:
-      "1e4",
-
-    factor:
-      1.7,
-
-    curve:
-      1.05,
-
-    effect:
-      1.12,
-  },
+  power:{basePrice:"1e2",factor:1.16,curve:0.05,effect:1.32},
+  luck:{basePrice:"2.5e2",factor:1.17,curve:0.055,effect:1.25},
+  maxweight:{basePrice:"1.5e2",factor:1.14,curve:0.035,effect:1.45},
+  sellmulti:{basePrice:"5e2",factor:1.18,curve:0.06,effect:1.18},
+  sizemulti:{basePrice:"3.5e2",factor:1.17,curve:0.055,effect:1.15},
 } as const;
-
 export const minerMathService = {
-  getUpgradePrice(
-    type:
-      MinerUpgrade,
-
-    level:
-      number,
-  ) {
-    const config =
-      UPGRADE_CONFIG[
-        type
-      ];
-
-    const decade =
-      Math.floor(
-        level /
-        10,
-      );
-
-    const curveExponent =
-      decade *
-      decade *
-      config.curve;
-
-    return new NexoNumber(
-      config.basePrice,
-    )
-      .mul(
-        new NexoNumber(
-          config.factor,
-        ).pow(
-          level,
-        ),
-      )
-      .mul(
-        new NexoNumber(
-          10,
-        ).pow(
-          curveExponent,
-        ),
-      );
+  getUpgradePrice(type:MinerUpgrade, level:number) {
+    const c=UPGRADE_CONFIG[type]; const milestone=Math.floor(Math.max(0,level)/50);
+    const curveExponent=milestone*milestone*c.curve;
+    return new NexoNumber(c.basePrice).mul(new NexoNumber(c.factor).pow(level)).mul(new NexoNumber(10).pow(curveExponent));
   },
-
-  getStats(
-    profile:
-      any,
-
-    pickaxe:
-      any,
-  ) {
-    const definition =
-      PICKAXE_MAP.get(
-        pickaxe
-          .definitionId,
-      );
-
-    const basePower =
-      new NexoNumber(
-        pickaxe.basePower ??
-        definition
-          ?.basePower ??
-        "1",
-      );
-
-    const baseLuck =
-      new NexoNumber(
-        pickaxe.baseLuck ??
-        definition
-          ?.baseLuck ??
-        "1",
-      );
-
-    const power =
-      basePower.mul(
-        new NexoNumber(
-          1.28,
-        ).pow(
-          pickaxe
-            .powerLevel,
-        ),
-      );
-
-    const luck =
-      baseLuck.mul(
-        new NexoNumber(
-          1.22,
-        ).pow(
-          pickaxe
-            .luckLevel,
-        ),
-      );
-
-    const maxWeight =
-      new NexoNumber(
-        100,
-      ).mul(
-        new NexoNumber(
-          1.35,
-        ).pow(
-          profile
-            .maxWeightLevel,
-        ),
-      );
-
-    const sellMulti =
-      new NexoNumber(
-        1.15,
-      ).pow(
-        profile
-          .sellMultiLevel,
-      );
-
-    const sizeMulti =
-      new NexoNumber(
-        1.12,
-      ).pow(
-        profile
-          .sizeMultiLevel,
-      );
-
+  getStats(profile:any,pickaxe:any) {
+    const d=PICKAXE_MAP.get(pickaxe.definitionId);
+    const permanent=minerProgressionService.getPermanentMultipliers(profile);
+    const basePower=new NexoNumber(pickaxe.basePower ?? d?.basePower ?? "1");
+    const baseLuck=new NexoNumber(pickaxe.baseLuck ?? d?.baseLuck ?? "1");
     return {
-      power,
-      luck,
-      maxWeight,
-      sellMulti,
-      sizeMulti,
+      power:basePower.mul(new NexoNumber(UPGRADE_CONFIG.power.effect).pow(pickaxe.powerLevel)).mul(permanent.power),
+      luck:baseLuck.mul(new NexoNumber(UPGRADE_CONFIG.luck.effect).pow(pickaxe.luckLevel)).mul(permanent.luck),
+      maxWeight:new NexoNumber(300).mul(new NexoNumber(UPGRADE_CONFIG.maxweight.effect).pow(profile.maxWeightLevel)).mul(permanent.bag),
+      sellMulti:new NexoNumber(UPGRADE_CONFIG.sellmulti.effect).pow(profile.sellMultiLevel).mul(permanent.sell),
+      sizeMulti:new NexoNumber(UPGRADE_CONFIG.sizemulti.effect).pow(profile.sizeMultiLevel).mul(permanent.size),
+      speedMulti:permanent.speed,
+      xpMulti:permanent.xp,
     };
   },
-
-  getMiningCycleMs(
-    power:
-      NexoNumber,
-  ) {
-    const raw =
-      power.value
-        .add(
-          1,
-        )
-        .log10()
-        .toNumber();
-
-    const logPower =
-      Number.isFinite(
-        raw,
-      )
-        ? Math.max(
-            0,
-            Math.min(
-              raw,
-              10_000,
-            ),
-          )
-        : 10_000;
-
-    return Math.max(
-      1_500,
-      Math.floor(
-        10_000 /
-        (
-          1 +
-          logPower *
-            0.5
-        ),
-      ),
-    );
+  getMiningCycleMs(power:NexoNumber, speedMulti:NexoNumber=NexoNumber.one()) {
+    const raw=power.value.add(1).log10().toNumber();
+    const logPower=Number.isFinite(raw)?Math.max(0,Math.min(raw,10000)):10000;
+    const speed=Math.max(1, Math.min(1e6, speedMulti.value.toNumber()));
+    return Math.max(500, Math.floor(5000/(1+logPower*0.7)/speed));
   },
 };

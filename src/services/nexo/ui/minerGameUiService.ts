@@ -1,4 +1,12 @@
 import {
+  minerUiPreferenceService,
+} from "./minerUiPreferenceService.js";
+
+import {
+  minerUpgradeQuantityModeService,
+} from "./minerUpgradeQuantityModeService.js";
+
+import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -22,6 +30,10 @@ import {
 } from "../minerPickaxeService.js";
 
 import {
+  minerPickaxeShopService,
+} from "../minerPickaxeShopService.js";
+
+import {
   minerBoostService,
 } from "../minerBoostService.js";
 
@@ -32,6 +44,10 @@ import {
 import {
   minerTradeService,
 } from "../minerTradeService.js";
+
+import {
+  minerProgressionService,
+} from "../minerProgressionService.js";
 
 import {
   economyService,
@@ -54,8 +70,8 @@ import {
 } from "../../../models/MinerTrade.js";
 
 import {
-  ORE_MAP,
-} from "../../../game/nexoMiner/oreCatalog.js";
+  minerOreVariantService,
+} from "../minerOreVariantService.js";
 
 import {
   PICKAXE_MAP,
@@ -84,6 +100,7 @@ export type MinerUiPage =
   | "boosts"
   | "chest"
   | "leaderboard"
+  | "progression"
   | "trade";
 
 function button(
@@ -192,6 +209,17 @@ function nav(
           style("trade"),
         ),
       ),
+
+    new ActionRowBuilder<ButtonBuilder>()
+      .addComponents(
+        button(
+          ownerId,
+          "progression",
+          "Progress",
+          "⭐",
+          style("progression"),
+        ),
+      ),
   ];
 }
 
@@ -272,10 +300,19 @@ export const minerGameUiService = {
       );
     }
 
-    const balance =
-      await economyService.getBalance(
-        ownerId,
-      );
+    const [
+      balance,
+      progression,
+    ] =
+      await Promise.all([
+        economyService.getBalance(
+          ownerId,
+        ),
+        minerProgressionService
+          .getStatus(
+            ownerId,
+          ),
+      ]);
 
     const {
       profile,
@@ -288,7 +325,7 @@ export const minerGameUiService = {
         pickaxe.definitionId,
       );
 
-    const status =
+    const miningStatus =
       profile.pausedReason ===
       "bag_full"
         ? "⏸️ BAG FULL"
@@ -298,20 +335,29 @@ export const minerGameUiService = {
       minerMathService
         .getMiningCycleMs(
           stats.power,
+          stats.speedMulti,
         );
+
+    const mineText =
+      progression
+        ? `${progression.area.emoji} **${progression.area.name}**`
+        : "⛏️ Mining";
+
+    const levelText =
+      progression
+        ? `**Lv.${progression.level}**\n${toSuffix(progression.xp)} / ${toSuffix(progression.xpRequired)} XP`
+        : `**Lv.${profile.minerLevel ?? 1}**`;
 
     return {
       embeds: [
         new EmbedBuilder()
           .setTitle(
-            "⛏️ NEXO MINER",
+            "⛏️ NEXO Miner",
           )
           .setDescription(
             [
-              `**${status}**`,
-              "",
-              "ขุดอัตโนมัติอยู่ตลอดเวลา",
-              "ใช้เมนูด้านล่างเพื่อเล่นเกมได้เลย",
+              `**${miningStatus}**`,
+              mineText,
             ].join("\n"),
           )
           .addFields(
@@ -319,9 +365,9 @@ export const minerGameUiService = {
               notice,
             ),
             {
-              name: "💰 NEXO",
+              name: "💰 Wallet",
               value:
-                `**${toSuffix(balance)}**`,
+                `**${toSuffix(balance)} NEXO**`,
               inline: true,
             },
             {
@@ -331,51 +377,35 @@ export const minerGameUiService = {
               inline: true,
             },
             {
-              name: "⏱️ Mining Speed",
+              name: "⭐ Level",
               value:
-                `**${toSuffix(String(cycleMs / 1000))}s / roll**`,
-              inline: true,
-            },
-            {
-              name: "💪 Power",
-              value:
-                `**${stats.power.toSuffix()}**`,
-              inline: true,
-            },
-            {
-              name: "🍀 Luck",
-              value:
-                `**${stats.luck.toSuffix()}**`,
+                levelText,
               inline: true,
             },
             {
               name: "🎒 Bag",
               value:
                 `**${toSuffix(profile.bagWeight)} / ${stats.maxWeight.toSuffix()} kg**`,
+              inline: false,
+            },
+            {
+              name: "⚡ Mining",
+              value:
+                `**${toSuffix(String(cycleMs / 1000))}s / roll**`,
               inline: true,
             },
             {
-              name: "💸 Sell Multi",
-              value:
-                `**×${stats.sellMulti.toSuffix()}**`,
-              inline: true,
-            },
-            {
-              name: "📏 Size Multi",
-              value:
-                `**×${stats.sizeMulti.toSuffix()}**`,
-              inline: true,
-            },
-            {
-              name: "💎 Overtime Networth",
-              value:
-                `**${toSuffix(profile.allTimeMinedNetworth)}**`,
+              name: "✨ Stats",
+              value: [
+                `💪 ${stats.power.toSuffix()}  •  🍀 ${stats.luck.toSuffix()}`,
+                `💰 Sell ×${stats.sellMulti.toSuffix()}  •  📏 Size ×${stats.sizeMulti.toSuffix()}`,
+              ].join("\n"),
               inline: true,
             },
           )
           .setFooter({
             text:
-              "NEXORA • NEXO Miner • Interactive UI",
+              "NEXORA • NEXO Miner",
           })
           .setTimestamp(),
       ],
@@ -416,21 +446,33 @@ export const minerGameUiService = {
         ),
     );
 
-    const lines =
-      stacks
-        .slice(0, 15)
-        .map((stack) => {
-          const ore =
-            ORE_MAP.get(
-              stack.definitionId,
-            );
+    const visible =
+      stacks.slice(
+        0,
+        15,
+      );
 
-          return [
-            `${rarityText(stack.rarity)} **${ore?.name ?? stack.definitionId}** ×${toSuffix(String(stack.quantity))}`,
-            `> ⚖️ ${toSuffix(stack.totalWeight)}kg • 💎 ${toSuffix(stack.totalNetWorth)}`,
-            `> Biggest ${toSuffix(stack.largestWeight)}kg • ${stack.largestSizeClass}`,
-          ].join("\n");
-        });
+    const lines =
+      visible.map(
+        (stack) => {
+          const info =
+            minerOreVariantService
+              .getDisplayInfo(
+                stack.definitionId,
+              );
+
+          const quantityText =
+            stack.quantity > 1
+              ? ` ×${toSuffix(String(stack.quantity))}`
+              : "";
+
+          return (
+            `${info.name} ` +
+            `(${toSuffix(stack.largestWeight)}kg)` +
+            quantityText
+          );
+        },
+      );
 
     const components:
       ActionRowBuilder<any>[] = [
@@ -450,7 +492,7 @@ export const minerGameUiService = {
             ),
             button(
               ownerId,
-              "home",
+              "refresh_bag",
               "Refresh",
               "🔄",
             ),
@@ -484,28 +526,29 @@ export const minerGameUiService = {
                 `nexo_miner_select:store:${ownerId}`,
               )
               .setPlaceholder(
-                "💎 ย้ายแร่ Legendary+ เข้า Rare Chest",
+                "💎 เก็บ Legendary+ เข้า Chest",
               )
               .addOptions(
                 chestEligible.map(
                   (stack) => {
-                    const ore =
-                      ORE_MAP.get(
-                        stack.definitionId,
-                      );
+                    const info =
+                      minerOreVariantService
+                        .getDisplayInfo(
+                          stack.definitionId,
+                        );
 
                     return {
                       label:
-                        (
-                          ore?.name ??
-                          stack.definitionId
-                        ).slice(0, 100),
+                        info.name.slice(
+                          0,
+                          100,
+                        ),
 
                       value:
                         stack.definitionId,
 
                       description:
-                        `${toSuffix(stack.totalWeight)}kg • ${toSuffix(stack.totalNetWorth)} NW`
+                        `${toSuffix(stack.largestWeight)}kg • ×${toSuffix(String(stack.quantity))}`
                           .slice(
                             0,
                             100,
@@ -522,14 +565,14 @@ export const minerGameUiService = {
       embeds: [
         new EmbedBuilder()
           .setTitle(
-            "🎒 Miner Bag",
+            "🎒 Bag",
           )
           .setDescription(
             lines.length
               ? lines.join(
-                  "\n\n",
+                  "\n",
                 )
-              : "กระเป๋ายังว่างอยู่ — ระบบกำลังขุดให้อัตโนมัติ",
+              : "กระเป๋ายังว่าง • Auto Mining กำลังทำงาน",
           )
           .addFields(
             ...noticeField(
@@ -543,7 +586,9 @@ export const minerGameUiService = {
           )
           .setFooter({
             text:
-              `${stacks.length} ore type(s)`,
+              stacks.length > 15
+                ? `${stacks.length} ore types • showing 15`
+                : `${stacks.length} ore types`,
           }),
       ],
 
@@ -565,6 +610,23 @@ export const minerGameUiService = {
         ownerId,
       );
     }
+
+    const upgradeQuantity =
+      minerUiPreferenceService
+        .getUpgradeQuantity(
+          ownerId,
+        );
+
+    const upgradeMax =
+      minerUpgradeQuantityModeService
+        .isMax(
+          ownerId,
+        );
+
+    const upgradeQuantityText =
+      upgradeMax
+        ? "MAX"
+        : `×${upgradeQuantity}`;
 
     const balance =
       await economyService.getBalance(
@@ -598,21 +660,21 @@ export const minerGameUiService = {
       },
       {
         id: "maxweight",
-        label: "Max Weight",
+        label: "Bag",
         emoji: "🎒",
         level:
           profile.maxWeightLevel,
       },
       {
         id: "sellmulti",
-        label: "Sell Multi",
+        label: "Sell",
         emoji: "💰",
         level:
           profile.sellMultiLevel,
       },
       {
         id: "sizemulti",
-        label: "Size Multi",
+        label: "Size",
         emoji: "📏",
         level:
           profile.sizeMultiLevel,
@@ -629,7 +691,11 @@ export const minerGameUiService = {
                 upgrade.level,
               );
 
-          return `${upgrade.emoji} **${upgrade.label} Lv.${toSuffix(String(upgrade.level))}**\n> Next: **${price.toSuffix()} NEXO**`;
+          return (
+            `${upgrade.emoji} **${upgrade.label}**` +
+            ` · Lv.${toSuffix(String(upgrade.level))}` +
+            ` · Next **${price.toSuffix()} NEXO**`
+          );
         },
       );
 
@@ -637,11 +703,11 @@ export const minerGameUiService = {
       embeds: [
         new EmbedBuilder()
           .setTitle(
-            "📈 Miner Upgrades",
+            "📈 Upgrades",
           )
           .setDescription(
             lines.join(
-              "\n\n",
+              "\n",
             ),
           )
           .addFields(
@@ -649,9 +715,16 @@ export const minerGameUiService = {
               notice,
             ),
             {
+              name: "🧮 Buy Qty",
+              value:
+                `**${upgradeQuantityText}**`,
+              inline: true,
+            },
+            {
               name: "💰 Wallet",
               value:
                 `**${toSuffix(balance)} NEXO**`,
+              inline: true,
             },
           ),
       ],
@@ -700,6 +773,17 @@ export const minerGameUiService = {
               ButtonStyle.Success,
             ),
           ),
+
+        new ActionRowBuilder<ButtonBuilder>()
+          .addComponents(
+            button(
+              ownerId,
+              "set_upgrade_qty",
+              `Buy ${upgradeQuantityText}`,
+              "🧮",
+              ButtonStyle.Primary,
+            ),
+          ),
       ],
     };
   },
@@ -722,21 +806,77 @@ export const minerGameUiService = {
       );
     }
 
-    const lines =
-      pickaxes
-        .slice(0, 15)
-        .map((pickaxe) => {
-          const definition =
-            PICKAXE_MAP.get(
-              pickaxe.definitionId,
-            );
+    const equipped =
+      pickaxes.find(
+        (pickaxe) =>
+          pickaxe.equipped,
+      ) ??
+      pickaxes[0];
 
-          return [
-            `${pickaxe.equipped ? "✅" : "⛏️"} ${rarityText(pickaxe.rarity)} **${definition?.name ?? pickaxe.definitionId}**`,
-            `> Power Lv.${toSuffix(String(pickaxe.powerLevel))} • Luck Lv.${toSuffix(String(pickaxe.luckLevel))}`,
-            `> 💎 ${toSuffix(pickaxe.baseNetWorth)}`,
-          ].join("\n");
-        });
+    const equippedDefinition =
+      PICKAXE_MAP.get(
+        equipped.definitionId,
+      );
+
+    const grouped =
+      new Map<
+        string,
+        {
+          name: string;
+          count: number;
+        }
+      >();
+
+    for (
+      const pickaxe
+      of pickaxes
+    ) {
+      const definition =
+        PICKAXE_MAP.get(
+          pickaxe.definitionId,
+        );
+
+      const current =
+        grouped.get(
+          pickaxe.definitionId,
+        );
+
+      if (current) {
+        current.count++;
+      } else {
+        grouped.set(
+          pickaxe.definitionId,
+          {
+            name:
+              definition?.name ??
+              pickaxe.definitionId,
+            count: 1,
+          },
+        );
+      }
+    }
+
+    const collectionLines =
+      Array.from(
+        grouped.values(),
+      )
+        .slice(
+          0,
+          12,
+        )
+        .map(
+          (entry) =>
+            `• ${entry.name}${entry.count > 1 ? ` ×${entry.count}` : ""}`,
+        );
+
+    if (
+      grouped.size >
+      12
+    ) {
+      collectionLines.push(
+        `• +${grouped.size - 12} more types`,
+      );
+    }
 
     const choices =
       pickaxes
@@ -766,7 +906,7 @@ export const minerGameUiService = {
                 `nexo_miner_select:equip:${ownerId}`,
               )
               .setPlaceholder(
-                "⛏️ เลือก Pickaxe ที่ต้องการ Equip",
+                "⛏️ เลือก Pickaxe เพื่อ Equip",
               )
               .addOptions(
                 choices.map(
@@ -787,7 +927,148 @@ export const minerGameUiService = {
                         pickaxe.pickaxeInstanceId,
 
                       description:
-                        `${rarityText(pickaxe.rarity)} • ${toSuffix(pickaxe.baseNetWorth)} NW`
+                        `${rarityText(pickaxe.rarity)} • Power Lv.${toSuffix(String(pickaxe.powerLevel))} • Luck Lv.${toSuffix(String(pickaxe.luckLevel))}`
+                          .slice(
+                            0,
+                            100,
+                          ),
+                    };
+                  },
+                ),
+              ),
+          ),
+      );
+    }
+
+    components.push(
+      new ActionRowBuilder<ButtonBuilder>()
+        .addComponents(
+          button(
+            ownerId,
+            "pickaxe_shop",
+            "Pickaxe Shop",
+            "🛒",
+            ButtonStyle.Primary,
+          ),
+        ),
+    );
+
+    return {
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(
+            "⛏️ Pickaxes",
+          )
+          .setDescription(
+            [
+              "**Equipped**",
+              `✅ ${rarityText(equipped.rarity)} **${equippedDefinition?.name ?? equipped.definitionId}**`,
+              `Power Lv.${toSuffix(String(equipped.powerLevel))} • Luck Lv.${toSuffix(String(equipped.luckLevel))}`,
+              `Value ${toSuffix(equipped.baseNetWorth)}`,
+              "",
+              `**Collection • ${pickaxes.length} owned**`,
+              ...collectionLines,
+            ].join(
+              "\n",
+            ),
+          )
+          .addFields(
+            ...noticeField(
+              notice,
+            ),
+          ),
+      ],
+
+      components,
+    };
+  },
+
+  async pickaxeShop(
+    ownerId: string,
+    notice?: string,
+  ): Promise<InteractionEditReplyOptions> {
+    const catalog =
+      await minerPickaxeShopService
+        .getCatalog(
+          ownerId,
+        );
+
+    const balance =
+      await economyService
+        .getBalance(
+          ownerId,
+        );
+
+    const lines =
+      catalog.rows
+        .slice(
+          0,
+          15,
+        )
+        .map(
+          (row) => {
+            const pickaxe =
+              row.definition as any;
+
+            return row.unlocked
+              ? `🟢 **${pickaxe.name}** — ${toSuffix(row.price)} NEXO`
+              : `🔒 **${pickaxe.name}** — Power Lv.${toSuffix(String(row.requiredPowerLevel))}`;
+          },
+        );
+
+    const available =
+      catalog.rows
+        .filter(
+          (row) =>
+            row.unlocked,
+        )
+        .slice(
+          0,
+          25,
+        );
+
+    const components:
+      ActionRowBuilder<any>[] = [
+        ...nav(
+          ownerId,
+          "pickaxes",
+        ),
+      ];
+
+    if (
+      available.length >
+      0
+    ) {
+      components.push(
+        new ActionRowBuilder<StringSelectMenuBuilder>()
+          .addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId(
+                `nexo_miner_select:buy-pickaxe:${ownerId}`,
+              )
+              .setPlaceholder(
+                "🛒 เลือก Pickaxe ที่ต้องการซื้อ",
+              )
+              .addOptions(
+                available.map(
+                  (row) => {
+                    const pickaxe =
+                      row.definition as any;
+
+                    return {
+                      label:
+                        String(
+                          pickaxe.name,
+                        ).slice(
+                          0,
+                          100,
+                        ),
+
+                      value:
+                        pickaxe.id,
+
+                      description:
+                        `${rarityText(pickaxe.rarity)} • ${toSuffix(row.price)} NEXO`
                           .slice(
                             0,
                             100,
@@ -804,18 +1085,36 @@ export const minerGameUiService = {
       embeds: [
         new EmbedBuilder()
           .setTitle(
-            "⛏️ Pickaxe Collection",
+            "🛒 Pickaxe Shop",
           )
           .setDescription(
-            lines.join(
-              "\n\n",
-            ),
+            lines.length
+              ? lines.join(
+                  "\n",
+                )
+              : "ยังไม่มี Pickaxe ในร้าน",
           )
           .addFields(
             ...noticeField(
               notice,
             ),
-          ),
+            {
+              name: "💰 Wallet",
+              value:
+                `**${toSuffix(balance)} NEXO**`,
+              inline: true,
+            },
+            {
+              name: "💪 Power",
+              value:
+                `**Lv.${toSuffix(String(catalog.highestPowerLevel))}**`,
+              inline: true,
+            },
+          )
+          .setFooter({
+            text:
+              "Legendary+ หาได้จาก Mining Drop หรือ Trade",
+          }),
       ],
 
       components,
@@ -826,6 +1125,12 @@ export const minerGameUiService = {
     ownerId: string,
     notice?: string,
   ): Promise<InteractionEditReplyOptions> {
+    const itemUseQuantity =
+      minerUiPreferenceService
+        .getItemUseQuantity(
+          ownerId,
+        );
+
     const inventory =
       await MinerInventoryItem
         .find({
@@ -837,17 +1142,27 @@ export const minerGameUiService = {
           },
         });
 
+    const visible =
+      inventory.slice(
+        0,
+        20,
+      );
+
     const lines =
-      inventory
-        .slice(0, 20)
-        .map((entry) => {
+      visible.map(
+        (entry) => {
           const item =
             MINER_ITEM_MAP.get(
               entry.itemId,
             );
 
-          return `${item?.emoji ?? "📦"} ${item ? rarityText(item.rarity) : ""} **${item?.name ?? entry.itemId} ×${toSuffix(String(entry.quantity))}**\n> 💎 ${item ? toSuffix(item.netWorth) : "?"}`;
-        });
+          return (
+            `${item?.emoji ?? "📦"} ` +
+            `**${item?.name ?? entry.itemId}** ` +
+            `×${toSuffix(String(entry.quantity))}`
+          );
+        },
+      );
 
     const usable =
       inventory
@@ -857,15 +1172,16 @@ export const minerGameUiService = {
               entry.itemId,
             );
 
-          return (
-            item?.type ===
-              "boost" ||
+          return Boolean(
+            item?.effect &&
             (
-              item?.type ===
-                "token" &&
-              item.effect
-                ?.infiniteBag
-            )
+              item.type === "boost" ||
+              item.effect.infiniteBag ||
+              item.effect.timeWarpSeconds ||
+              item.effect.maxWeightLevels ||
+              item.effect.chestSlots ||
+              item.effect.prestigeStars
+            ),
           );
         })
         .slice(0, 25);
@@ -876,6 +1192,17 @@ export const minerGameUiService = {
           ownerId,
           "items",
         ),
+
+        new ActionRowBuilder<ButtonBuilder>()
+          .addComponents(
+            button(
+              ownerId,
+              "set_item_qty",
+              `Use ×${itemUseQuantity}`,
+              "🧮",
+              ButtonStyle.Primary,
+            ),
+          ),
       ];
 
     if (
@@ -890,7 +1217,7 @@ export const minerGameUiService = {
                 `nexo_miner_select:use:${ownerId}`,
               )
               .setPlaceholder(
-                "🧪 เลือก Item ที่ต้องการใช้",
+                `🧪 เลือก Item เพื่อใช้ ×${itemUseQuantity}`,
               )
               .addOptions(
                 usable.map(
@@ -911,7 +1238,7 @@ export const minerGameUiService = {
                         item.id,
 
                       description:
-                        `${rarityText(item.rarity)} • ×${entry.quantity}`
+                        `${rarityText(item.rarity)} • Owned ×${toSuffix(String(entry.quantity))}`
                           .slice(
                             0,
                             100,
@@ -928,12 +1255,12 @@ export const minerGameUiService = {
       embeds: [
         new EmbedBuilder()
           .setTitle(
-            "🧪 Miner Items",
+            "🧪 Items",
           )
           .setDescription(
             lines.length
               ? lines.join(
-                  "\n\n",
+                  "\n",
                 )
               : "ยังไม่มี Miner Item",
           )
@@ -941,7 +1268,19 @@ export const minerGameUiService = {
             ...noticeField(
               notice,
             ),
-          ),
+            {
+              name: "🧮 Use Qty",
+              value:
+                `**×${itemUseQuantity}**`,
+              inline: true,
+            },
+          )
+          .setFooter({
+            text:
+              inventory.length > 20
+                ? `${inventory.length} item types • showing 20`
+                : `${inventory.length} item types`,
+          }),
       ],
 
       components,
@@ -957,10 +1296,33 @@ export const minerGameUiService = {
         ownerId,
       );
 
+    const labels:
+      Record<string, string> = {
+        power: "Power",
+        luck: "Luck",
+        size: "Size",
+        sell: "Sell",
+        speed: "Mining Speed",
+        xp: "XP",
+        drop: "Drop Rate",
+        mutation: "Mutation Chance",
+        all: "All Stats",
+      };
+
     const lines =
       boosts.map(
-        (boost) =>
-          `🧪 **${boost.stat.toUpperCase()} ×${toSuffix(boost.multiplier)}**\n> หมดเวลา <t:${Math.floor(boost.expiresAt.getTime() / 1000)}:R>`,
+        (boost) => {
+          const label =
+            labels[
+              boost.stat
+            ] ??
+            boost.stat;
+
+          return (
+            `⚡ **${label} ×${toSuffix(boost.multiplier)}**` +
+            ` · <t:${Math.floor(boost.expiresAt.getTime() / 1000)}:R>`
+          );
+        },
       );
 
     return {
@@ -972,9 +1334,9 @@ export const minerGameUiService = {
           .setDescription(
             lines.length
               ? lines.join(
-                  "\n\n",
+                  "\n",
                 )
-              : "ตอนนี้ไม่มี Boost ที่กำลังทำงาน",
+              : "ไม่มี Boost ที่กำลังทำงาน",
           )
           .addFields(
             ...noticeField(
@@ -994,6 +1356,12 @@ export const minerGameUiService = {
     ownerId: string,
     notice?: string,
   ): Promise<InteractionEditReplyOptions> {
+    const shopQuantity =
+      minerUiPreferenceService
+        .getShopQuantity(
+          ownerId,
+        );
+
     const balance =
       await economyService.getBalance(
         ownerId,
@@ -1009,18 +1377,18 @@ export const minerGameUiService = {
         .slice(0, 15)
         .map(
           (item) =>
-            `${item.emoji} ${rarityText(item.rarity)} **${item.name}**\n> 💰 ${toSuffix(item.shopPrice!)} NEXO • 💎 ${toSuffix(item.netWorth)}`,
+            `${item.emoji} **${item.name}** — ${toSuffix(item.shopPrice!)} NEXO`,
         );
 
     return {
       embeds: [
         new EmbedBuilder()
           .setTitle(
-            "🛒 NEXO Miner Shop",
+            "🛒 Shop",
           )
           .setDescription(
             lines.join(
-              "\n\n",
+              "\n",
             ),
           )
           .addFields(
@@ -1028,14 +1396,21 @@ export const minerGameUiService = {
               notice,
             ),
             {
+              name: "🧮 Buy Qty",
+              value:
+                `**×${shopQuantity}**`,
+              inline: true,
+            },
+            {
               name: "💰 Wallet",
               value:
                 `**${toSuffix(balance)} NEXO**`,
+              inline: true,
             },
           )
           .setFooter({
             text:
-              "เลือก Item ด้านล่างเพื่อซื้อ 1 ชิ้น • Slash command ใช้ซื้อจำนวนมากได้",
+              `เลือก Item ด้านล่างเพื่อซื้อ • ×${shopQuantity} ต่อครั้ง`,
           }),
       ],
 
@@ -1045,6 +1420,17 @@ export const minerGameUiService = {
           "shop",
         ),
 
+        new ActionRowBuilder<ButtonBuilder>()
+          .addComponents(
+            button(
+              ownerId,
+              "set_shop_qty",
+              `Buy ×${shopQuantity}`,
+              "🧮",
+              ButtonStyle.Primary,
+            ),
+          ),
+
         new ActionRowBuilder<StringSelectMenuBuilder>()
           .addComponents(
             new StringSelectMenuBuilder()
@@ -1052,7 +1438,7 @@ export const minerGameUiService = {
                 `nexo_miner_select:buy:${ownerId}`,
               )
               .setPlaceholder(
-                "🛒 เลือก Item เพื่อซื้อ ×1",
+                `🛒 เลือก Item เพื่อซื้อ ×${shopQuantity}`,
               )
               .addOptions(
                 catalog.map(
@@ -1089,15 +1475,33 @@ export const minerGameUiService = {
         ownerId,
       );
 
-    const lines =
-      stacks.map((stack) => {
-        const ore =
-          ORE_MAP.get(
-            stack.definitionId,
-          );
+    const visible =
+      stacks.slice(
+        0,
+        20,
+      );
 
-        return `${rarityText(stack.rarity)} **${ore?.name ?? stack.definitionId} ×${toSuffix(String(stack.quantity))}**\n> ⚖️ ${toSuffix(stack.totalWeight)}kg • 💎 ${toSuffix(stack.totalNetWorth)}`;
-      });
+    const lines =
+      visible.map(
+        (stack) => {
+          const info =
+            minerOreVariantService
+              .getDisplayInfo(
+                stack.definitionId,
+              );
+
+          const quantityText =
+            stack.quantity > 1
+              ? ` ×${toSuffix(String(stack.quantity))}`
+              : "";
+
+          return (
+            `${info.name} ` +
+            `(${toSuffix(stack.largestWeight)}kg)` +
+            quantityText
+          );
+        },
+      );
 
     const components:
       ActionRowBuilder<any>[] = [
@@ -1119,23 +1523,21 @@ export const minerGameUiService = {
                 `nexo_miner_select:take:${ownerId}`,
               )
               .setPlaceholder(
-                "🎒 เลือกแร่เพื่อนำกลับเข้ากระเป๋า",
+                "🎒 เลือกแร่เพื่อนำกลับเข้า Bag",
               )
               .addOptions(
                 stacks
                   .slice(0, 25)
                   .map((stack) => {
-                    const ore =
-                      ORE_MAP.get(
-                        stack.definitionId,
-                      );
+                    const info =
+                      minerOreVariantService
+                        .getDisplayInfo(
+                          stack.definitionId,
+                        );
 
                     return {
                       label:
-                        (
-                          ore?.name ??
-                          stack.definitionId
-                        ).slice(
+                        info.name.slice(
                           0,
                           100,
                         ),
@@ -1144,7 +1546,7 @@ export const minerGameUiService = {
                         stack.definitionId,
 
                       description:
-                        `${toSuffix(stack.totalWeight)}kg • ${toSuffix(stack.totalNetWorth)} NW`
+                        `${toSuffix(stack.largestWeight)}kg • ×${toSuffix(String(stack.quantity))}`
                           .slice(
                             0,
                             100,
@@ -1165,7 +1567,7 @@ export const minerGameUiService = {
           .setDescription(
             lines.length
               ? lines.join(
-                  "\n\n",
+                  "\n",
                 )
               : "Rare Chest ยังว่างอยู่",
           )
@@ -1173,10 +1575,116 @@ export const minerGameUiService = {
             ...noticeField(
               notice,
             ),
-          ),
+          )
+          .setFooter({
+            text:
+              stacks.length > 20
+                ? `${stacks.length} ore types • showing 20`
+                : `${stacks.length} ore types`,
+          }),
       ],
 
       components,
+    };
+  },
+
+  async progression(
+    ownerId: string,
+    notice?: string,
+  ): Promise<InteractionEditReplyOptions> {
+    const status =
+      await minerProgressionService
+        .getStatus(
+          ownerId,
+        );
+
+    if (!status) {
+      return missingProfile(
+        ownerId,
+      );
+    }
+
+    const profile =
+      status.profile;
+
+    const next =
+      status.nextArea;
+
+    const nextMineText =
+      next
+        ? `${next.emoji} **${next.name}** · Lv.${next.requiredLevel}`
+        : "Ω **All Mine Areas unlocked**";
+
+    return {
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(
+            "⭐ Progress",
+          )
+          .setDescription(
+            [
+              "🌍 **Current Mine**",
+              `${status.area.emoji} ${status.area.name}`,
+              "",
+              "🔓 **Next Mine**",
+              nextMineText,
+            ].join(
+              "\n",
+            ),
+          )
+          .addFields(
+            ...noticeField(
+              notice,
+            ),
+            {
+              name: "⭐ Level",
+              value:
+                `**Lv.${status.level}**\n${toSuffix(status.xp)} / ${toSuffix(status.xpRequired)} XP`,
+              inline: true,
+            },
+            {
+              name: "🌟 Prestige",
+              value:
+                `**${profile.prestigeCount ?? 0} times • ${profile.prestigeStars ?? 0} stars**\nNext at Lv.${status.prestigeRequiredLevel}`,
+              inline: true,
+            },
+            {
+              name: "🔥 Ultra",
+              value:
+                `**${profile.ultraPrestigeCount ?? 0} times • ${profile.ultraCores ?? 0} cores**\nNeed Prestige ${status.ultraRequiredPrestiges} + Lv.${status.ultraRequiredLevel}`,
+              inline: true,
+            },
+          )
+          .setFooter({
+            text:
+              "Prestige keeps Pickaxes • Chest • Items • Wallet",
+          }),
+      ],
+
+      components: [
+        ...nav(
+          ownerId,
+          "progression",
+        ),
+
+        new ActionRowBuilder<ButtonBuilder>()
+          .addComponents(
+            button(
+              ownerId,
+              "prestige",
+              "Prestige",
+              "⭐",
+              ButtonStyle.Success,
+            ),
+            button(
+              ownerId,
+              "ultra_prestige",
+              "Ultra Prestige",
+              "🔥",
+              ButtonStyle.Danger,
+            ),
+          ),
+      ],
     };
   },
 
@@ -1370,6 +1878,12 @@ export const minerGameUiService = {
     tradeId: string,
     notice?: string,
   ): Promise<InteractionEditReplyOptions> {
+    const tradeItemQuantity =
+      minerUiPreferenceService
+        .getTradeItemQuantity(
+          ownerId,
+        );
+
     const result =
       await minerTradeService.get(
         tradeId,
@@ -1404,7 +1918,7 @@ export const minerGameUiService = {
         of side.ores
       ) {
         lines.push(
-          `⛏️ ${ore.definitionId} • ${toSuffix(ore.totalNetWorth)} NW`,
+          `⛏️ ${minerOreVariantService.getDisplayInfo(ore.definitionId).name} • ${toSuffix(ore.totalNetWorth)} NW`,
         );
       }
 
@@ -1468,6 +1982,10 @@ export const minerGameUiService = {
 
           tradeLocked:
             false,
+
+          definitionId: {
+            $not: /~/,
+          },
         })
         .limit(25);
 
@@ -1541,12 +2059,17 @@ export const minerGameUiService = {
                 ButtonStyle.Danger,
               ),
 
-            button(
-              ownerId,
-              "trade",
-              "Back",
-              "↩️",
-            ),
+            new ButtonBuilder()
+              .setCustomId(
+                `nexo_miner:set_trade_item_qty:${ownerId}:${tradeId}`,
+              )
+              .setLabel(
+                `Item ×${tradeItemQuantity}`,
+              )
+              .setEmoji("🧮")
+              .setStyle(
+                ButtonStyle.Secondary,
+              ),
           ),
       ];
 
@@ -1562,7 +2085,7 @@ export const minerGameUiService = {
                 `nexo_miner_select:trade-item:${ownerId}:${tradeId}`,
               )
               .setPlaceholder(
-                "📦 เพิ่ม Item ×1 เข้า Offer",
+                `📦 เพิ่ม Item ×${tradeItemQuantity} เข้า Offer`,
               )
               .addOptions(
                 items.map(
@@ -1615,7 +2138,7 @@ export const minerGameUiService = {
                   (ore) => ({
                     label:
                       (
-                        ORE_MAP.get(
+                        minerOreVariantService.getDisplayInfo(
                           ore.definitionId,
                         )?.name ??
                         ore.definitionId
@@ -1760,6 +2283,12 @@ export const minerGameUiService = {
 
       case "chest":
         return this.chest(
+          ownerId,
+          notice,
+        );
+
+      case "progression":
+        return this.progression(
           ownerId,
           notice,
         );

@@ -11,6 +11,10 @@ import {
 } from "../../services/nexo/minerPickaxeService.js";
 
 import {
+  minerPickaxeShopService,
+} from "../../services/nexo/minerPickaxeShopService.js";
+
+import {
   minerBoostService,
 } from "../../services/nexo/minerBoostService.js";
 
@@ -25,6 +29,14 @@ import {
 import {
   minerTradeService,
 } from "../../services/nexo/minerTradeService.js";
+
+import {
+  toSuffix,
+} from "../../services/nexo/NexoNumber.js";
+
+import {
+  minerUiPreferenceService,
+} from "../../services/nexo/ui/minerUiPreferenceService.js";
 
 export const customId =
   "nexo_miner_select:";
@@ -77,6 +89,38 @@ export async function execute(
 
   if (
     action ===
+    "buy-pickaxe" &&
+    interaction.isStringSelectMenu()
+  ) {
+    const definitionId =
+      interaction.values[0];
+
+    const result =
+      await minerPickaxeShopService.buy(
+        ownerId,
+        definitionId,
+      );
+
+    await interaction.editReply(
+      await minerGameUiService.pickaxeShop(
+        ownerId,
+        [
+          "✅ **ซื้อ Pickaxe สำเร็จ!**",
+          `⛏️ ${definitionId}`,
+          `💰 ราคา ${toSuffix(result.price)} NEXO`,
+          "",
+          "ไปที่ My Pickaxes เพื่อ Equip ได้เลย",
+        ].join(
+          "\n",
+        ),
+      ),
+    );
+
+    return;
+  }
+
+  if (
+    action ===
     "equip" &&
     interaction.isStringSelectMenu()
   ) {
@@ -106,15 +150,22 @@ export async function execute(
     const itemId =
       interaction.values[0];
 
-    await minerBoostService.useItem(
+    const quantity =
+      minerUiPreferenceService
+        .getItemUseQuantity(
+          ownerId,
+        );
+
+    await minerBoostService.useItemMany(
       ownerId,
       itemId,
+      quantity,
     );
 
     await interaction.editReply(
       await minerGameUiService.items(
         ownerId,
-        `🧪 ใช้ **${itemId}** แล้ว`,
+        `🧪 ใช้ **${itemId} ×${quantity}** แล้ว`,
       ),
     );
 
@@ -129,16 +180,22 @@ export async function execute(
     const itemId =
       interaction.values[0];
 
+    const quantity =
+      minerUiPreferenceService
+        .getShopQuantity(
+          ownerId,
+        );
+
     await minerShopService.buy(
       ownerId,
       itemId,
-      1,
+      quantity,
     );
 
     await interaction.editReply(
       await minerGameUiService.shop(
         ownerId,
-        `🛒 ซื้อ **${itemId} ×1** แล้ว`,
+        `🛒 ซื้อ **${itemId} ×${quantity}** แล้ว`,
       ),
     );
 
@@ -301,12 +358,18 @@ export async function execute(
           itemId,
       );
 
+    const addQuantity =
+      minerUiPreferenceService
+        .getTradeItemQuantity(
+          ownerId,
+        );
+
     const quantity =
       (
         existing?.quantity ??
         0
       ) +
-      1;
+      addQuantity;
 
     await minerTradeService.offerItem(
       extra,
@@ -319,7 +382,7 @@ export async function execute(
       await minerGameUiService.tradeDetail(
         ownerId,
         extra,
-        `📦 เพิ่ม ${itemId} ×1 เข้า Offer`,
+        `📦 เพิ่ม ${itemId} ×${addQuantity} เข้า Offer`,
       ),
     );
 

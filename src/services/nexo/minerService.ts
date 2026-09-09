@@ -47,8 +47,16 @@ import {
 
 import {
   minerRngService,
-  type MinerSizeClass,
 } from "./minerRngService.js";
+
+import {
+  MINER_SIZE_RANK,
+  type MinerSizeClass,
+} from "../../game/nexoMiner/oreVariantCatalog.js";
+
+import {
+  minerOreVariantService,
+} from "./minerOreVariantService.js";
 
 
 import {
@@ -59,6 +67,10 @@ import {
   minerLootService,
 } from "./minerLootService.js";
 
+import {
+  minerProgressionService,
+} from "./minerProgressionService.js";
+
 const MAX_SETTLEMENT_CYCLES =
   20_000;
 
@@ -68,17 +80,8 @@ const SETTLEMENT_LOCK_MS =
 const STARTER_PICKAXE =
   PICKAXE_CATALOG[0];
 
-const SIZE_RANK:
-  Record<
-    MinerSizeClass,
-    number
-  > = {
-    normal: 0,
-    large: 1,
-    giant: 2,
-    colossal: 3,
-    titan: 4,
-  };
+const SIZE_RANK =
+  MINER_SIZE_RANK;
 
 interface StackDelta {
   definitionId:
@@ -325,6 +328,14 @@ export const minerService = {
 
                   totalOresMined:
                     "0",
+
+                  minerLevel: 1,
+                  minerXp: "0",
+                  highestMinerLevel: 1,
+                  prestigeCount: 0,
+                  prestigeStars: 0,
+                  ultraPrestigeCount: 0,
+                  ultraCores: 0,
                 },
               ],
               {
@@ -541,12 +552,29 @@ export const minerService = {
           baseStats.sellMulti.mul(
             boostMultipliers.sell,
           ),
+
+        speedMulti:
+          baseStats.speedMulti.mul(
+            boostMultipliers.speed,
+          ),
+
+        xpMulti:
+          baseStats.xpMulti.mul(
+            boostMultipliers.xp,
+          ),
       };
+
+      const miningPower =
+        minerProgressionService.capPower(
+          stats.power,
+          profile.minerLevel ?? 1,
+        );
 
       const cycleMs =
         minerMathService
           .getMiningCycleMs(
             stats.power,
+            stats.speedMulti,
           );
 
       const lastSettledMs =
@@ -615,6 +643,9 @@ export const minerService = {
       let mined =
         0;
 
+      let minedXp =
+        0;
+
       let processed =
         0;
 
@@ -646,16 +677,34 @@ export const minerService = {
           break;
         }
 
-        const roll =
+        const baseRoll =
           minerRngService.rollOre(
-            stats.power,
+            miningPower,
             stats.luck,
-            stats.sizeMulti,
+            NexoNumber.one(),
             rng,
+          );
+
+        const mutation =
+          minerOreVariantService.rollMutation(
+            boostMultipliers.mutation,
+            rng,
+          );
+
+        const roll =
+          minerOreVariantService.applyRoll(
+            baseRoll,
+            stats.sizeMulti,
+            mutation,
           );
 
         processed++;
         mined++;
+        minedXp +=
+          minerProgressionService.getOreXp(
+            roll.ore.rarity,
+            roll.weight,
+          );
 
         /*
          * Oversize protection:
@@ -676,7 +725,7 @@ export const minerService = {
 
         const current =
           deltas.get(
-            roll.ore.id,
+            roll.stackDefinitionId,
           );
 
         if (current) {
@@ -720,10 +769,10 @@ export const minerService = {
           }
         } else {
           deltas.set(
-            roll.ore.id,
+            roll.stackDefinitionId,
             {
               definitionId:
-                roll.ore.id,
+                roll.stackDefinitionId,
 
               rarity:
                 roll.ore
@@ -931,6 +980,17 @@ export const minerService = {
             currentProfile.pendingLootRolls +=
               mined;
 
+            const xpMultiplierRaw =
+              stats.xpMulti.value.toNumber();
+            const xpMultiplier =
+              Number.isFinite(xpMultiplierRaw)
+                ? Math.max(1, Math.min(1e6, xpMultiplierRaw))
+                : 1e6;
+            minerProgressionService.applyXp(
+              currentProfile,
+              minedXp * xpMultiplier,
+            );
+
             currentProfile
               .totalOresMined =
               new NexoNumber(
@@ -993,7 +1053,9 @@ export const minerService = {
             discordId,
             {
               luck:
-                stats.luck,
+                stats.luck.mul(
+                  boostMultipliers.drop,
+                ),
 
               rng,
             },
@@ -1104,6 +1166,16 @@ export const minerService = {
         sellMulti:
           baseStats.sellMulti.mul(
             boosts.sell,
+          ),
+
+        speedMulti:
+          baseStats.speedMulti.mul(
+            boosts.speed,
+          ),
+
+        xpMulti:
+          baseStats.xpMulti.mul(
+            boosts.xp,
           ),
       },
     };
@@ -2102,8 +2174,14 @@ export const minerService = {
     definitionId:
       string,
   ) {
+    const parsed =
+      minerOreVariantService
+        .parseStackDefinitionId(
+          definitionId,
+        );
+
     return ORE_MAP.get(
-      definitionId,
+      parsed.baseDefinitionId,
     );
   },
 };

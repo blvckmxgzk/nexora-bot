@@ -1,6 +1,7 @@
 import {
   Schema,
   model,
+  models,
 } from "mongoose";
 
 const systemStateSchema =
@@ -40,6 +41,7 @@ const systemStateSchema =
   );
 
 export const SystemState =
+  models.SystemState ??
   model(
     "SystemState",
     systemStateSchema,

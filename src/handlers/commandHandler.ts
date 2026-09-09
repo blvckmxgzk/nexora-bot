@@ -7,6 +7,12 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
+  runtimeModuleRoot,
+  runtimeModuleExtension,
+} from "../utils/runtimeModuleLoader.js";
+
+
+import {
   marketplaceMaintenanceService,
 } from "../services/community/marketplaceMaintenanceService.js";
 
@@ -24,7 +30,7 @@ export class CommandHandler {
   public async loadCommands(): Promise<void> {
     const commandsPath = join(
       process.cwd(),
-      "dist",
+      runtimeModuleRoot,
       "commands",
     );
 
@@ -44,7 +50,11 @@ export class CommandHandler {
         continue;
       }
 
-      if (!entry.name.endsWith(".js")) {
+      if (
+        !entry.name.endsWith(
+          runtimeModuleExtension,
+        )
+      ) {
         continue;
       }
 
