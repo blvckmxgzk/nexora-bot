@@ -96,6 +96,27 @@ export const reportService = {
     return report;
   },
 
+  async linkTicket(
+    reportId: string,
+    ticketId: string,
+    ticketChannelId: string,
+  ) {
+    return Report.findOneAndUpdate(
+      {
+        reportId,
+      },
+      {
+        $set: {
+          ticketId,
+          ticketChannelId,
+        },
+      },
+      {
+        new: true,
+      },
+    );
+  },
+
   async getByReportId(
     reportId: string,
   ) {

@@ -3,77 +3,83 @@ import {
   model,
 } from "mongoose";
 
-const reportSchema =
+const securityIncidentSchema =
   new Schema(
     {
-      reportId: {
+      incidentId: {
         type: String,
         required: true,
         unique: true,
         index: true,
       },
 
-      orderId: {
+      guildId: {
         type: String,
         required: true,
-        index: true,
-      },
-
-      buyerId: {
-        type: String,
-        required: true,
-        index: true,
-      },
-
-      sellerId: {
-        type: String,
-        required: true,
-        index: true,
-      },
-
-      shopId: {
-        type: String,
-        required: true,
-        index: true,
-      },
-
-      productId: {
-        type: String,
-        default: null,
         index: true,
       },
 
       type: {
         type: String,
-        enum: [
-          "scam",
-          "delivery",
-          "payment",
-          "other",
-        ],
-        default: "scam",
+        required: true,
+        index: true,
       },
 
-      reason: {
+      severity: {
+        type: String,
+        enum: [
+          "medium",
+          "high",
+          "critical",
+        ],
+        default: "high",
+        index: true,
+      },
+
+      executorId: {
+        type: String,
+        default: null,
+        index: true,
+      },
+
+      targetId: {
+        type: String,
+        default: null,
+      },
+
+      auditLogEntryId: {
+        type: String,
+        default: null,
+        index: true,
+      },
+
+      action: {
+        type: String,
+        required: true,
+      },
+
+      description: {
         type: String,
         required: true,
         maxlength: 2000,
-        trim: true,
       },
 
       status: {
         type: String,
         enum: [
           "open",
-          "investigating",
           "resolved",
-          "dismissed",
         ],
         default: "open",
         index: true,
       },
 
-      reviewedBy: {
+      resolvedAt: {
+        type: Date,
+        default: null,
+      },
+
+      resolvedBy: {
         type: String,
         default: null,
       },
@@ -81,28 +87,13 @@ const reportSchema =
       resolution: {
         type: String,
         default: null,
-        maxlength: 2000,
+        maxlength: 1000,
       },
 
-      ticketId: {
-        type: String,
-        default: null,
-        index: true,
-      },
-
-      ticketChannelId: {
-        type: String,
-        default: null,
-      },
-
-      createdAt: {
-        type: Date,
-        default: Date.now,
-      },
-
-      resolvedAt: {
-        type: Date,
-        default: null,
+      metadata: {
+        type:
+          Schema.Types.Mixed,
+        default: {},
       },
     },
     {
@@ -111,8 +102,13 @@ const reportSchema =
     },
   );
 
-export const Report =
+securityIncidentSchema.index({
+  guildId: 1,
+  createdAt: -1,
+});
+
+export const SecurityIncident =
   model(
-    "Report",
-    reportSchema,
+    "SecurityIncident",
+    securityIncidentSchema,
   );

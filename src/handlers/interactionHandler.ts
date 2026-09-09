@@ -18,6 +18,10 @@ import {
   marketplaceMaintenanceService,
 } from "../services/community/marketplaceMaintenanceService.js";
 
+import {
+  autoModService,
+} from "../services/community/autoModService.js";
+
 export interface NEXORAInteraction {
   customId: string;
 
@@ -254,6 +258,73 @@ export class InteractionHandler {
       if (
         interaction.isChatInputCommand()
       ) {
+        if (
+          interaction.inGuild()
+        ) {
+          const rateLimit =
+            await autoModService
+              .checkCommandRateLimit(
+                interaction.guildId,
+                interaction.user.id,
+              );
+
+          if (
+            !rateLimit.allowed
+          ) {
+            let caseId:
+              string | null =
+                null;
+
+            if (
+              rateLimit.newViolation
+            ) {
+              const audit =
+                await autoModService
+                  .recordCommandSpam(
+                    interaction.guildId,
+                    interaction.user.id,
+                    interaction.channelId,
+                  );
+
+              caseId =
+                audit.caseId ??
+                null;
+            }
+
+            const seconds =
+              Math.max(
+                1,
+                Math.ceil(
+                  rateLimit
+                    .retryAfterMs /
+                  1000,
+                ),
+              );
+
+            await interaction.reply({
+              content:
+                [
+                  "🤖 **NEXORA AutoMod • Command Spam**",
+                  `กรุณารอ **${seconds}s** ก่อนใช้คำสั่งต่อ`,
+                  caseId
+                    ? `Case: \`${caseId}\``
+                    : null,
+                ]
+                  .filter(
+                    Boolean,
+                  )
+                  .join(
+                    "\n",
+                  ),
+
+              ephemeral:
+                true,
+            });
+
+            return;
+          }
+        }
+
         await this.commandHandler.execute(
           interaction,
         );
