@@ -60,6 +60,8 @@ import {
   minerSettlementWorker,
 } from "./services/nexo/minerSettlementWorker.js";
 
+import { memberLifecycleRuntime } from "./services/community/memberLifecycleRuntime.js";
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -119,7 +121,9 @@ async function bootstrap(): Promise<void> {
     client,
   );
 
-  setMarketplaceDiscordClient(
+  memberLifecycleRuntime.start(client);
+
+setMarketplaceDiscordClient(
     client,
   );
 
@@ -208,7 +212,9 @@ async function bootstrap(): Promise<void> {
       payoutReconciliationWorker.stop();
     disputeReconciliationWorker.stop();
 
-      client.destroy();
+      memberLifecycleRuntime.stop();
+
+client.destroy();
 
       await disconnectDatabase();
 

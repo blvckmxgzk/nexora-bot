@@ -1,0 +1,23 @@
+
+> nexora-bot@1.0.0 build
+> tsc
+
+src/services/community/memberLifecycleRuntime.ts(182,15): error TS18047: 'message.guild' is possibly 'null'.
+src/services/community/memberLifecycleRuntime.ts(188,18): error TS18047: 'message.guild' is possibly 'null'.
+src/services/community/memberLifecycleRuntime.ts(214,22): error TS18047: 'message.guild' is possibly 'null'.
+src/services/community/memberLifecycleRuntime.ts(342,12): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(event: Events.GuildMemberRemove, listener: (member: GuildMember | PartialGuildMember) => void): Client<boolean>', gave the following error.
+    Argument of type '(member: GuildMember) => void' is not assignable to parameter of type '(member: GuildMember | PartialGuildMember) => void'.
+      Types of parameters 'member' and 'member' are incompatible.
+        Type 'GuildMember | PartialGuildMember' is not assignable to type 'GuildMember'.
+          Property '_roles' is missing in type 'Partialize<GuildMember, "pending" | "joinedAt" | "joinedTimestamp", null, "">' but required in type 'GuildMember'.
+  Overload 2 of 2, '(event: never, listener: (...args: any[]) => void): Client<boolean>', gave the following error.
+    Argument of type 'Events.GuildMemberRemove' is not assignable to parameter of type 'never'.
+src/services/community/memberLifecycleRuntime.ts(347,12): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(event: Events.GuildMemberUpdate, listener: (oldMember: GuildMember | PartialGuildMember, newMember: GuildMember) => void): Client<boolean>', gave the following error.
+    Argument of type '(_oldMember: GuildMember, newMember: GuildMember) => void' is not assignable to parameter of type '(oldMember: GuildMember | PartialGuildMember, newMember: GuildMember) => void'.
+      Types of parameters '_oldMember' and 'oldMember' are incompatible.
+        Type 'GuildMember | PartialGuildMember' is not assignable to type 'GuildMember'.
+          Property '_roles' is missing in type 'Partialize<GuildMember, "pending" | "joinedAt" | "joinedTimestamp", null, "">' but required in type 'GuildMember'.
+  Overload 2 of 2, '(event: never, listener: (...args: any[]) => void): Client<boolean>', gave the following error.
+    Argument of type 'Events.GuildMemberUpdate' is not assignable to parameter of type 'never'.
