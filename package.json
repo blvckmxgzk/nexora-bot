@@ -15,7 +15,8 @@
     "test:marketplace": "npm run build && node scripts/marketplace-smoke-test.mjs",
     "auto-push": "node scripts/auto-push.mjs",
     "prelive:audit": "tsx src/scripts/phase64-prelive-audit.ts",
-    "nexo:migrate": "tsx src/scripts/migrate-nexo-big-number.ts"
+    "nexo:migrate": "tsx src/scripts/migrate-nexo-big-number.ts",
+    "prebuild": "node scripts/clean-dist.mjs"
   },
   "engines": {
     "node": ">=22.0.0"
