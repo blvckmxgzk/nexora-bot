@@ -2,6 +2,10 @@ import type { Client } from "discord.js";
 
 import { guildService } from "../services/guildService.js";
 
+import {
+  recoveryService,
+} from "../services/community/recoveryService.js";
+
 export const name = "clientReady";
 export const once = true;
 
@@ -18,6 +22,14 @@ export async function execute(
 
   console.log(
     `🌐 Connected to ${client.guilds.cache.size} guild(s)`,
+  );
+
+  recoveryService.startAutoSnapshots(
+    client,
+  );
+
+  console.log(
+    "💾 NEXORA Disaster Recovery scheduler started",
   );
 
   for (const guild of client.guilds.cache.values()) {
