@@ -62,6 +62,10 @@ import {
 
 import { memberLifecycleRuntime } from "./services/community/memberLifecycleRuntime.js";
 
+import {
+  communityLoggingRuntime,
+} from "./services/logging/communityLoggingRuntime.js";
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -122,6 +126,7 @@ async function bootstrap(): Promise<void> {
   );
 
   memberLifecycleRuntime.start(client);
+  communityLoggingRuntime.start(client);
 
 setMarketplaceDiscordClient(
     client,
@@ -212,6 +217,7 @@ setMarketplaceDiscordClient(
       payoutReconciliationWorker.stop();
     disputeReconciliationWorker.stop();
 
+      communityLoggingRuntime.stop();
       memberLifecycleRuntime.stop();
 
 client.destroy();
