@@ -1,16 +1,18 @@
+import mongoose from "mongoose";
+
 import type {
   FastifyPluginAsync,
 } from "fastify";
-
-import {
-  marketplaceOpsHealthService,
-} from "../../services/marketplace/marketplaceOpsHealthService.js";
 
 export const healthRoute:
   FastifyPluginAsync =
   async (
     app,
   ) => {
+    /*
+     * Liveness:
+     * process/API is running.
+     */
     app.get(
       "/health",
       async () => {
@@ -36,51 +38,56 @@ export const healthRoute:
       },
     );
 
+    /*
+     * Readiness:
+     *
+     * Marketplace v1 used to check:
+     * Payment / Refund / Payout / Dispute /
+     * Webhook and financial workers here.
+     *
+     * Marketplace v2 does not process real money,
+     * so readiness now reflects infrastructure
+     * required by the active application.
+     */
     app.get(
       "/ready",
       async (
         _request,
         reply,
       ) => {
-        const readiness =
-          await marketplaceOpsHealthService
-            .getReadiness();
+        const databaseReady =
+          mongoose.connection
+            .readyState ===
+          1;
 
-        /*
-         * Public readiness ต้องไม่เผย:
-         * - worker names
-         * - failure counters
-         * - last errors
-         * - internal timestamps
-         *
-         * รายละเอียดเหล่านั้นดูผ่าน
-         * Administrator /ops-status เท่านั้น
-         */
-        const workersHealthy =
-          readiness.workers
-            ?.healthy ===
-          true;
+        const ready =
+          databaseReady;
 
         return reply
           .code(
-            readiness.ready
+            ready
               ? 200
               : 503,
           )
           .send({
             success:
-              readiness.ready,
+              ready,
 
             service:
               "nexora-api",
 
             status:
-              readiness.status,
+              ready
+                ? "ready"
+                : "not_ready",
 
             database:
-              readiness.database,
+              databaseReady
+                ? "connected"
+                : "disconnected",
 
-            workersHealthy,
+            marketplace:
+              "trade-handoff",
 
             timestamp:
               new Date()
