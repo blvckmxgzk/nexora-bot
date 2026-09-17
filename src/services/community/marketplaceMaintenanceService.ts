@@ -45,7 +45,7 @@ export const marketplaceMaintenanceService = {
     const runtimeEnabled =
       state
         ?.marketplaceMaintenance ??
-      true;
+      false;
 
     return {
       enabled:
@@ -186,8 +186,8 @@ export const marketplaceMaintenanceService = {
       "",
       "ขณะนี้ยังไม่เปิด:",
       "• การสร้างร้านค้า",
-      "• การสั่งซื้อสินค้า",
-      "• การชำระเงินจริง",
+      "• การสร้าง Trade Request",
+      "• การติดต่อผู้ขายผ่าน Marketplace",
       "• การจัดการสินค้า/ร้านค้าสำหรับสมาชิก",
       "",
       "ระบบ Community, NEXO, Ticket และระบบสมาชิกยังใช้งานได้ตามปกติ",

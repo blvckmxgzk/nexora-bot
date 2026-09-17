@@ -32,7 +32,12 @@ export async function execute(
   const shop =
     await Shop.findOne({
       shopId,
-      status: "verified",
+      status: {
+        $in: [
+          "pending",
+          "verified",
+        ],
+      },
     });
 
   if (!shop) {

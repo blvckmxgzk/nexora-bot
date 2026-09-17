@@ -20,6 +20,12 @@ const reviewSchema =
         index: true,
       },
 
+      tradeRequestId: {
+        type: String,
+        default: null,
+        index: true,
+      },
+
       shopId: {
         type: String,
         required: true,

@@ -55,7 +55,12 @@ export async function execute(
   const shop =
     await Shop.findOne({
       shopId: product.shopId,
-      status: "verified",
+      status: {
+        $in: [
+          "pending",
+          "verified",
+        ],
+      },
     });
 
   if (!shop) {
@@ -109,8 +114,8 @@ export async function execute(
             "ไม่มีรายละเอียดสินค้า",
           "",
           shopStatus.open
-            ? "🟢 **ร้านเปิดอยู่ — สามารถสั่งซื้อได้**"
-            : "🔴 **ร้านปิดอยู่ — ขณะนี้ไม่สามารถสั่งซื้อได้**",
+            ? "🟢 **ร้านเปิดอยู่ — สามารถติดต่อเจ้าของร้านได้**"
+            : "🔴 **ร้านปิดอยู่ — ขณะนี้ไม่สามารถติดต่อเจ้าของร้านได้**",
         ].join("\n"),
       )
       .addFields(
@@ -121,7 +126,9 @@ export async function execute(
         },
         {
           name: "🛡️ ผู้ขาย",
-          value: "🟢 Verified Seller",
+          value: shop.status === "verified"
+            ? "🟢 Verified Seller"
+            : "⚪ Unverified Seller",
           inline: true,
         },
         {
@@ -253,8 +260,8 @@ export async function execute(
         .setCustomId(
           `nexora_product_buy:${product.productId}`,
         )
-        .setLabel("ซื้อสินค้า")
-        .setEmoji("🛒")
+        .setLabel("ติดต่อเจ้าของร้าน")
+        .setEmoji("💬")
         .setStyle(
           ButtonStyle.Success,
         ),

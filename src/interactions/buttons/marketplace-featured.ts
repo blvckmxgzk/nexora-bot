@@ -16,7 +16,12 @@ export async function execute(
 ): Promise<void> {
   const shops =
     await Shop.find({
-      status: "verified",
+      status: {
+        $in: [
+          "pending",
+          "verified",
+        ],
+      },
       completedOrders: {
         $gt: 0,
       },

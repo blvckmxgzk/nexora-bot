@@ -14,7 +14,7 @@ const systemStateSchema =
 
       marketplaceMaintenance: {
         type: Boolean,
-        default: true,
+        default: false,
       },
 
       marketplaceMaintenanceReason: {
@@ -30,6 +30,11 @@ const systemStateSchema =
       },
 
       marketplaceMaintenanceUpdatedAt: {
+        type: Date,
+        default: null,
+      },
+
+      marketplaceV2InitializedAt: {
         type: Date,
         default: null,
       },

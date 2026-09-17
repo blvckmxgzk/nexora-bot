@@ -65,16 +65,27 @@ Ticket เป็นช่องทางหลักสำหรับเรื�
     ],
 
     content: `
-Marketplace กำลังปรับสถาปัตยกรรมเป็น:
+Marketplace v2 ใช้ Flow:
 Shop → Product → Trade Request → DM Handoff → Completion → Review
 
-NEXORA จะทำหน้าที่เป็นตัวกลางในการค้นหาร้านและติดต่อผู้ขาย
-ไม่ได้มีเป้าหมายถือหรือรับเงินการซื้อขายระหว่างผู้ซื้อกับผู้ขาย
+เมื่อ Buyer กด "ติดต่อเจ้าของร้าน":
+- ระบบสร้าง Trade Request
+- Seller ได้รับ DM
+- Seller กด "ติดต่อแล้ว"
+- Buyer และ Seller ติดต่อซื้อขายกันโดยตรง
+- Buyer ยืนยันสำเร็จ
+- Seller ยืนยันสำเร็จ
+- จากนั้น Buyer จึงรีวิวร้านได้ 1–5 ดาว
 
-เมื่อผู้ซื้อสนใจสินค้า ระบบจะสร้าง Trade Request,
-แจ้งผู้ขายและผู้ซื้อผ่าน DM,
-จากนั้นทั้งสองฝ่ายติดต่อและซื้อขายกันโดยตรง
-เมื่อ Buyer และ Seller ยืนยันสำเร็จจึงปลดล็อก Review
+สถานะหลัก:
+waiting_seller → contacted → buyer_confirmed → completed
+หรือ cancelled / expired
+
+NEXORA ไม่รับเงิน ไม่ถือเงินจริง ไม่ทำ Escrow,
+ไม่สร้าง PromptPay QR, ไม่ Refund และไม่ Payout
+
+Verified Seller เป็นเครื่องหมายความน่าเชื่อถือ
+ไม่ได้เป็นเงื่อนไขบังคับว่าร้านจึงจะเพิ่มสินค้าหรือขายได้
 `.trim(),
   },
 

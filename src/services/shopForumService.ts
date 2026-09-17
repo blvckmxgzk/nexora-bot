@@ -56,7 +56,7 @@ function getStatus(
     case "pending":
     default:
       return {
-        label: "🟡 **รอการตรวจสอบ**",
+        label: "⚪ **Unverified Seller**",
         color: 0xf59e0b,
         prefix: "🏪",
       };
@@ -148,7 +148,7 @@ export async function updateShopForum(
           inline: true,
         },
         {
-          name: "🛒 ออเดอร์สำเร็จ",
+          name: "🤝 Trade สำเร็จ",
           value:
             shop.completedOrders.toLocaleString(
               "th-TH",
@@ -180,7 +180,8 @@ export async function updateShopForum(
    * BASE_TYPE_BAD_LENGTH
    */
   if (
-    shop.status === "verified"
+    shop.status === "verified" ||
+    shop.status === "pending"
   ) {
     const row =
       new ActionRowBuilder<ButtonBuilder>()

@@ -1,55 +1,31 @@
 import Fastify from "fastify";
-import fastifyRawBody from "fastify-raw-body";
 
 import {
   healthRoute,
 } from "./routes/health.js";
 
-import {
-  webhookRoutes,
-} from "./routes/webhooks.js";
-
 const MAX_BODY_BYTES =
-  256 * 1024;
+  256 *
+  1024;
 
 export async function createApiServer() {
-  const app = Fastify({
-    logger:
-      true,
-
-    trustProxy:
-      true,
-
-    bodyLimit:
-      MAX_BODY_BYTES,
-
-    connectionTimeout:
-      10_000,
-
-    requestTimeout:
-      30_000,
-  });
-
-  await app.register(
-    fastifyRawBody,
-    {
-      field:
-        "rawBody",
-
-      global:
-        false,
-
-      encoding:
-        "utf8",
-
-      runFirst:
+  const app =
+    Fastify({
+      logger:
         true,
 
-      routes: [
-        "/api/v1/webhooks/omise",
-      ],
-    },
-  );
+      trustProxy:
+        true,
+
+      bodyLimit:
+        MAX_BODY_BYTES,
+
+      connectionTimeout:
+        10_000,
+
+      requestTimeout:
+        30_000,
+    });
 
   app.addHook(
     "onSend",
@@ -88,34 +64,25 @@ export async function createApiServer() {
         "no-store",
       );
 
-      if (
-        process.env.NODE_ENV ===
-        "production"
-      ) {
-        reply.header(
-          "Strict-Transport-Security",
-          "max-age=31536000; includeSubDomains",
-        );
-      }
-
       return payload;
     },
   );
 
   app.get(
     "/",
-    async () => {
-      return {
-        name:
-          "NEXORA API",
+    async () => ({
+      name:
+        "NEXORA API",
 
-        version:
-          "1.0.0",
+      version:
+        "2.0.0",
 
-        status:
-          "online",
-      };
-    },
+      status:
+        "online",
+
+      marketplace:
+        "trade-handoff",
+    }),
   );
 
   await app.register(
@@ -127,26 +94,17 @@ export async function createApiServer() {
   );
 
   /*
-   * Public API เปิดเฉพาะ signed Provider webhook
-   * และ health endpoints
+   * Marketplace v2 intentionally exposes
+   * no payment / payout / refund webhook.
    *
-   * ห้าม register orderRoutes/paymentRoutes
-   * โดยไม่มี authenticated ownership layer
+   * Buyer and Seller transact directly.
    */
-  await app.register(
-    webhookRoutes,
-    {
-      prefix:
-        "/api/v1",
-    },
-  );
-
   app.setNotFoundHandler(
     async (
       _request,
       reply,
-    ) => {
-      return reply
+    ) =>
+      reply
         .code(
           404,
         )
@@ -156,70 +114,7 @@ export async function createApiServer() {
 
           error:
             "Not found",
-        });
-    },
-  );
-
-  app.setErrorHandler(
-    async (
-      error,
-      request,
-      reply,
-    ) => {
-      request.log.error(
-        error,
-      );
-
-      if (
-        reply.sent
-      ) {
-        return;
-      }
-
-      const statusCode =
-        typeof error ===
-          "object" &&
-        error !==
-          null &&
-        "statusCode" in
-          error &&
-        typeof error
-          .statusCode ===
-          "number" &&
-        error.statusCode >=
-          400
-          ? error.statusCode
-          : 500;
-
-      const publicMessage =
-        statusCode >=
-        500
-          ? "Internal server error"
-          : (
-              typeof error ===
-                "object" &&
-              error !==
-                null &&
-              "message" in
-                error &&
-              typeof error.message ===
-                "string"
-                ? error.message
-                : "Request failed"
-            );
-
-      await reply
-        .code(
-          statusCode,
-        )
-        .send({
-          success:
-            false,
-
-          error:
-            publicMessage,
-        });
-    },
+        }),
   );
 
   return app;

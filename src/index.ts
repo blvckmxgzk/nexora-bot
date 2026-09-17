@@ -4,55 +4,34 @@ import {
   Partials,
 } from "discord.js";
 
-import { env } from "./config/env.js";
+import {
+  env,
+} from "./config/env.js";
 
 import {
   connectDatabase,
   disconnectDatabase,
 } from "./database/connection.js";
 
-import { CommandHandler } from "./handlers/commandHandler.js";
-import { EventHandler } from "./handlers/eventHandler.js";
-import { InteractionHandler } from "./handlers/interactionHandler.js";
+import {
+  CommandHandler,
+} from "./handlers/commandHandler.js";
 
 import {
-  paymentExpirationWorker,
-} from "./services/paymentExpirationWorker.js";
+  EventHandler,
+} from "./handlers/eventHandler.js";
 
 import {
-  payoutReconciliationWorker,
-} from "./services/payoutReconciliationWorker.js";
-
-import {
-  disputeReconciliationWorker,
-} from "./services/disputeReconciliationWorker.js";
-
-import {
-  marketplaceOpsMonitorWorker,
-} from "./services/marketplace/marketplaceOpsMonitorWorker.js";
-
-import {
-  notificationDeliveryWorker,
-} from "./services/marketplace/notificationDeliveryWorker.js";
-
-import {
-  assertMarketplaceFinancialRuntimeSafety,
-} from "./services/marketplace/financialRuntimeSafety.js";
-
-import {
-  backfillSellerFinancialStates,
-} from "./services/marketplace/sellerFinancialStateBackfillService.js";
+  InteractionHandler,
+} from "./handlers/interactionHandler.js";
 
 import {
   createApiServer,
 } from "./api/server.js";
 
 import {
-  setMarketplaceDiscordClient,
-} from "./services/marketplace/marketplaceNotificationService.js";
-
-
-import { memberLifecycleRuntime } from "./services/community/memberLifecycleRuntime.js";
+  memberLifecycleRuntime,
+} from "./services/community/memberLifecycleRuntime.js";
 
 import {
   nexoraChatbotRuntime,
@@ -70,29 +49,59 @@ import {
   temporaryVoicePanelRuntime,
 } from "./services/voice/temporaryVoicePanelRuntime.js";
 
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    ...(process.env.NEXORA_GUILD_MEMBERS_INTENT === "true"
-      ? [GatewayIntentBits.GuildMembers]
-      : []),
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMessages,
-    ...(env.NEXORA_MESSAGE_CONTENT_INTENT
-      ? [GatewayIntentBits.MessageContent]
-      : []),
-    GatewayIntentBits.AutoModerationConfiguration,
-    GatewayIntentBits.AutoModerationExecution,
-    GatewayIntentBits.GuildModeration,
-  ],
+import {
+  marketplaceV2Runtime,
+} from "./services/marketplace/marketplaceV2Runtime.js";
 
-  partials: [
-    Partials.Channel,
-    Partials.Message,
-    Partials.GuildMember,
-    Partials.User,
-  ],
-});
+const client =
+  new Client({
+    intents: [
+      GatewayIntentBits.Guilds,
+
+      ...(
+        process.env
+          .NEXORA_GUILD_MEMBERS_INTENT ===
+        "true"
+          ? [
+              GatewayIntentBits
+                .GuildMembers,
+            ]
+          : []
+      ),
+
+      GatewayIntentBits
+        .GuildVoiceStates,
+
+      GatewayIntentBits
+        .GuildMessages,
+
+      ...(
+        env
+          .NEXORA_MESSAGE_CONTENT_INTENT
+          ? [
+              GatewayIntentBits
+                .MessageContent,
+            ]
+          : []
+      ),
+
+      GatewayIntentBits
+        .AutoModerationConfiguration,
+
+      GatewayIntentBits
+        .AutoModerationExecution,
+
+      GatewayIntentBits
+        .GuildModeration,
+    ],
+
+    partials: [
+      Partials.Channel,
+      Partials.Message,
+      Partials.GuildMember,
+      Partials.User,
+    ],
+  });
 
 const commandHandler =
   new CommandHandler();
@@ -105,52 +114,77 @@ const interactionHandler =
     commandHandler,
   );
 
-async function bootstrap(): Promise<void> {
+async function bootstrap():
+  Promise<void> {
   console.log(
     "🚀 Starting NEXORA...",
   );
 
   /*
-   * Fail closed ก่อนเชื่อม DB/Discord
-   * หาก production financial config
-   * ไม่ปลอดภัย
+   * Marketplace v2 no longer runs:
+   *
+   * - payment financial safety gate
+   * - seller financial state backfill
+   * - payment expiration worker
+   * - payout reconciliation
+   * - dispute reconciliation
+   * - financial notification worker
+   * - marketplace financial ops monitor
+   *
+   * Marketplace v2 is:
+   *
+   * Shop → Product → Trade Request
+   * → DM Handoff → Completion → Review
    */
-  assertMarketplaceFinancialRuntimeSafety();
 
   await connectDatabase();
 
-  const financialBackfill =
-    await backfillSellerFinancialStates();
+  await commandHandler
+    .loadCommands();
 
-  console.log(
-    `🧾 SellerFinancialState backfill: scanned=${financialBackfill.scanned} created=${financialBackfill.created} existing=${financialBackfill.existing}`,
-  );
+  await eventHandler
+    .loadEvents(
+      client,
+    );
 
-  await commandHandler.loadCommands();
+  await interactionHandler
+    .loadInteractions(
+      client,
+    );
 
-  await eventHandler.loadEvents(
-    client,
-  );
+  /*
+   * Register runtimes BEFORE login so their
+   * ClientReady listeners cannot miss ready.
+   */
+  memberLifecycleRuntime
+    .start(
+      client,
+    );
 
-  memberLifecycleRuntime.start(client);
-  nexoraChatbotRuntime.start(client);
-  communityLoggingRuntime.start(client);
-  temporaryVoiceRuntime.start(client);
-  temporaryVoicePanelRuntime.start(client);
+  nexoraChatbotRuntime
+    .start(
+      client,
+    );
 
-setMarketplaceDiscordClient(
-    client,
-  );
-await interactionHandler.loadInteractions(
-    client,
-  );
+  communityLoggingRuntime
+    .start(
+      client,
+    );
 
-  
-  paymentExpirationWorker.start();
-  payoutReconciliationWorker.start();
-  disputeReconciliationWorker.start();
-  notificationDeliveryWorker.start();
-  marketplaceOpsMonitorWorker.start();
+  temporaryVoiceRuntime
+    .start(
+      client,
+    );
+
+  temporaryVoicePanelRuntime
+    .start(
+      client,
+    );
+
+  marketplaceV2Runtime
+    .start(
+      client,
+    );
 
   const apiServer =
     await createApiServer();
@@ -162,28 +196,20 @@ await interactionHandler.loadInteractions(
     env.API_PORT;
 
   await apiServer.listen({
-    host: API_HOST,
-    port: API_PORT,
+    host:
+      API_HOST,
+
+    port:
+      API_PORT,
   });
 
   console.log(
     `🌐 NEXORA API listening on ${API_HOST}:${API_PORT}`,
   );
 
-  if (
-    env.NEXORA_PUBLIC_API_URL
-  ) {
-    const publicApi =
-      env.NEXORA_PUBLIC_API_URL
-        .replace(
-          /\/$/,
-          "",
-        );
-
-    console.log(
-      `🔔 Omise webhook target: ${publicApi}/api/v1/webhooks/omise`,
-    );
-  }
+  console.log(
+    "🛒 Marketplace v2 • Trade Handoff Mode",
+  );
 
   await client.login(
     env.DISCORD_TOKEN,
@@ -193,8 +219,13 @@ await interactionHandler.loadInteractions(
     false;
 
   const shutdown =
-    async (signal: string) => {
-      if (shuttingDown) {
+    async (
+      signal:
+        string,
+    ): Promise<void> => {
+      if (
+        shuttingDown
+      ) {
         return;
       }
 
@@ -205,57 +236,79 @@ await interactionHandler.loadInteractions(
         `\n🛑 Received ${signal}`,
       );
 
+      /*
+       * Stop event-producing runtimes first.
+       */
+      marketplaceV2Runtime
+        .stop();
+
+      temporaryVoicePanelRuntime
+        .stop();
+
+      temporaryVoiceRuntime
+        .stop();
+
+      communityLoggingRuntime
+        .stop();
+
+      nexoraChatbotRuntime
+        .stop();
+
+      memberLifecycleRuntime
+        .stop();
+
       try {
-        await apiServer.close();
-      } catch (error) {
+        await apiServer
+          .close();
+      } catch (
+        error
+      ) {
         console.error(
           "❌ Failed to close API server:",
           error,
         );
       }
 
-      
-      notificationDeliveryWorker.stop();
-      marketplaceOpsMonitorWorker.stop();
-      paymentExpirationWorker.stop();
-      payoutReconciliationWorker.stop();
-    disputeReconciliationWorker.stop();
-
-      temporaryVoicePanelRuntime.stop();
-      temporaryVoiceRuntime.stop();
-      communityLoggingRuntime.stop();
-      nexoraChatbotRuntime.stop();
-      memberLifecycleRuntime.stop();
-
-client.destroy();
+      client.destroy();
 
       await disconnectDatabase();
 
-      process.exit(0);
+      process.exit(
+        0,
+      );
     };
 
   process.once(
     "SIGINT",
     () => {
-      void shutdown("SIGINT");
+      void shutdown(
+        "SIGINT",
+      );
     },
   );
 
   process.once(
     "SIGTERM",
     () => {
-      void shutdown("SIGTERM");
+      void shutdown(
+        "SIGTERM",
+      );
     },
   );
 }
 
-bootstrap().catch(
-  (error) => {
-    console.error(
-      "❌ Failed to start NEXORA:",
+bootstrap()
+  .catch(
+    (
       error,
-    );
+    ) => {
+      console.error(
+        "❌ Failed to start NEXORA:",
+        error,
+      );
 
-    process.exit(1);
-  },
-);
+      process.exit(
+        1,
+      );
+    },
+  );
