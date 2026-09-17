@@ -10,8 +10,8 @@ export const healthRoute:
     app,
   ) => {
     /*
-     * Liveness:
-     * process/API is running.
+     * Liveness confirms that the API process
+     * is running and able to respond.
      */
     app.get(
       "/health",
@@ -39,15 +39,8 @@ export const healthRoute:
     );
 
     /*
-     * Readiness:
-     *
-     * Marketplace v1 used to check:
-     * Payment / Refund / Payout / Dispute /
-     * Webhook and financial workers here.
-     *
-     * Marketplace v2 does not process real money,
-     * so readiness now reflects infrastructure
-     * required by the active application.
+     * Readiness reflects infrastructure
+     * required by the active NEXORA runtime.
      */
     app.get(
       "/ready",
