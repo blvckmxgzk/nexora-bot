@@ -86,6 +86,44 @@ const envSchema = z.object({
       .min(1)
       .optional(),
 
+  GROQ_API_KEY:
+    z.string()
+      .min(1)
+      .optional(),
+
+  GROQ_MODEL:
+    z.string()
+      .min(1)
+      .default(
+        "openai/gpt-oss-120b",
+      ),
+
+  NEXORA_AI_ENABLED:
+    z.enum([
+      "true",
+      "false",
+    ])
+      .default(
+        "true",
+      )
+      .transform(
+        (value) =>
+          value === "true",
+      ),
+
+  NEXORA_MESSAGE_CONTENT_INTENT:
+    z.enum([
+      "true",
+      "false",
+    ])
+      .default(
+        "false",
+      )
+      .transform(
+        (value) =>
+          value === "true",
+      ),
+
   API_HOST:
     z.string()
       .min(1)
