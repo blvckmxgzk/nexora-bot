@@ -10,8 +10,11 @@ import {
 } from "../services/voice/temporaryVoiceService.js";
 
 import {
-  buildTemporaryVoicePanel,
-  buildTemporaryVoicePanelEmbed,
+  temporaryVoicePanelService,
+} from "../services/voice/temporaryVoicePanelService.js";
+
+import {
+  buildTemporaryVoiceStatusEmbed,
 } from "../services/voice/temporaryVoiceUi.js";
 
 export const data =
@@ -29,23 +32,10 @@ export const data =
       ) =>
         subcommand
           .setName(
-            "panel",
-          )
-          .setDescription(
-            "เปิด Control Panel ของห้องส่วนตัว",
-          ),
-    )
-
-    .addSubcommand(
-      (
-        subcommand,
-      ) =>
-        subcommand
-          .setName(
             "status",
           )
           .setDescription(
-            "ดูสถานะ Temporary Voice ของคุณ",
+            "ดูสถานะ Temporary Voice Room ของคุณ",
           ),
     )
 
@@ -58,7 +48,7 @@ export const data =
             "setup",
           )
           .setDescription(
-            "สร้าง/ซ่อม Join-to-Create Hub สำหรับแอดมิน",
+            "สร้าง/ซ่อม Temporary Voice และ Control Panel",
           ),
     );
 
@@ -68,13 +58,10 @@ export async function execute(
 ): Promise<void> {
   await interaction.deferReply({
     flags:
-      MessageFlags
-        .Ephemeral,
+      MessageFlags.Ephemeral,
   });
 
-  if (
-    !interaction.guild
-  ) {
+  if (!interaction.guild) {
     await interaction.editReply({
       content:
         "❌ คำสั่งนี้ใช้ได้เฉพาะใน NEXORA Server",
@@ -113,12 +100,9 @@ export async function execute(
         return;
       }
 
-      const {
-        category,
-        hub,
-      } =
-        await temporaryVoiceService
-          .ensureSetup(
+      const result =
+        await temporaryVoicePanelService
+          .ensurePanel(
             interaction.guild,
           );
 
@@ -132,10 +116,13 @@ export async function execute(
         content: [
           "✅ **NEXORA Temporary Voice พร้อมใช้งานแล้ว**",
           "",
-          `Category: **${category.name}**`,
-          `Join-to-Create: <#${hub.id}>`,
-          `Synced rooms: **${reconcile.synced}**`,
-          `Cleaned stale rooms: **${reconcile.deleted}**`,
+          `Category: **${result.category.name}**`,
+          `Join-to-Create: <#${result.hub.id}>`,
+          `Control Panel: <#${result.panelChannel.id}>`,
+          `Panel Message: \`${result.panelMessage.id}\``,
+          "",
+          `Synced Rooms: **${reconcile.synced}**`,
+          `Cleaned Rooms: **${reconcile.deleted}**`,
         ].join(
           "\n",
         ),
@@ -152,9 +139,9 @@ export async function execute(
         );
 
     if (!state) {
-      const setup =
-        await temporaryVoiceService
-          .ensureSetup(
+      const result =
+        await temporaryVoicePanelService
+          .ensurePanel(
             interaction.guild,
           );
 
@@ -162,7 +149,8 @@ export async function execute(
         content: [
           "🔊 คุณยังไม่มี Temporary Voice Room",
           "",
-          `เข้า <#${setup.hub.id}> เพื่อสร้างห้องส่วนตัว`,
+          `สร้างห้องโดยเข้า <#${result.hub.id}>`,
+          `จากนั้นใช้พาแนลถาวรที่ <#${result.panelChannel.id}>`,
         ].join(
           "\n",
         ),
@@ -171,46 +159,13 @@ export async function execute(
       return;
     }
 
-    if (
-      subcommand ===
-      "status"
-    ) {
-      await interaction.editReply({
-        embeds: [
-          buildTemporaryVoicePanelEmbed(
-            state.room as any,
-            state.channel,
-          ),
-        ],
-      });
-
-      return;
-    }
-
-    if (
-      subcommand ===
-      "panel"
-    ) {
-      await interaction.editReply({
-        embeds: [
-          buildTemporaryVoicePanelEmbed(
-            state.room as any,
-            state.channel,
-          ),
-        ],
-
-        components:
-          buildTemporaryVoicePanel(
-            state.room as any,
-          ),
-      });
-
-      return;
-    }
-
     await interaction.editReply({
-      content:
-        "❌ Unknown voice subcommand",
+      embeds: [
+        buildTemporaryVoiceStatusEmbed(
+          state.room as any,
+          state.channel,
+        ),
+      ],
     });
   } catch (
     error

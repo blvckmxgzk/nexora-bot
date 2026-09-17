@@ -93,8 +93,12 @@ Temporary Voice ใช้ระบบ Join-to-Create ผ่านห้อง �
 สมาชิกหนึ่งคนเป็นเจ้าของห้องชั่วคราวได้สูงสุด 1 ห้อง
 หากมีห้องอยู่แล้ว ระบบจะย้ายเจ้าของกลับไปยังห้องเดิมแทนการสร้างซ้ำ
 
-Owner ใช้ /voice panel เพื่อ Rename, ตั้ง User Limit,
-ปรับ Bitrate, Lock/Unlock, Hide/Show, Allow/Remove Access,
+มี Control Panel ถาวรอยู่ในช่อง 🎛️・ควบคุมห้องส่วนตัว
+สมาชิกไม่ต้องใช้ /voice panel ทุกครั้งที่สร้างห้อง
+เมื่อกดปุ่ม ระบบจะค้นหา Temporary Voice Room ที่ผู้กดเป็น Owner อยู่ในขณะนั้น
+
+Owner สามารถ Rename, ตั้ง User Limit, ปรับ Bitrate,
+Lock/Unlock, Hide/Show, Allow/Remove Access,
 Ban เฉพาะห้อง, Transfer Ownership และลบห้องได้
 
 เมื่อห้องเหลือสมาชิก 0 คน ห้องจะถูกลบทันที

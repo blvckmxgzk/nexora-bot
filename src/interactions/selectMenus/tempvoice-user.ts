@@ -7,6 +7,10 @@ import {
   temporaryVoiceService,
 } from "../../services/voice/temporaryVoiceService.js";
 
+import {
+  temporaryVoicePanelService,
+} from "../../services/voice/temporaryVoicePanelService.js";
+
 export const customId =
   "tempvoice-user:";
 
@@ -16,14 +20,11 @@ export async function execute(
 ): Promise<void> {
   await interaction.deferReply({
     flags:
-      MessageFlags
-        .Ephemeral,
+      MessageFlags.Ephemeral,
   });
 
   try {
-    if (
-      !interaction.guild
-    ) {
+    if (!interaction.guild) {
       throw new Error(
         "ใช้ Temporary Voice ได้เฉพาะใน Server",
       );
@@ -32,7 +33,6 @@ export async function execute(
     const [
       namespace,
       action,
-      channelId,
     ] =
       interaction.customId
         .split(
@@ -42,8 +42,7 @@ export async function execute(
     if (
       namespace !==
         "tempvoice-user" ||
-      !action ||
-      !channelId
+      !action
     ) {
       throw new Error(
         "Temporary Voice action ไม่ถูกต้อง",
@@ -51,15 +50,38 @@ export async function execute(
     }
 
     const userId =
-      interaction.values[
-        0
-      ];
+      interaction.values[0];
 
     if (!userId) {
       throw new Error(
         "กรุณาเลือกสมาชิก",
       );
     }
+
+    const state =
+      await temporaryVoiceService
+        .getOwnedRoomState(
+          interaction.guild,
+          interaction.user.id,
+        );
+
+    if (!state) {
+      const panel =
+        await temporaryVoicePanelService
+          .ensurePanel(
+            interaction.guild,
+          );
+
+      await interaction.editReply({
+        content:
+          `❌ คุณยังไม่มีห้อง กรุณาเข้า <#${panel.hub.id}> ก่อน`,
+      });
+
+      return;
+    }
+
+    const channelId =
+      state.channel.id;
 
     if (
       action ===
@@ -75,7 +97,7 @@ export async function execute(
 
       await interaction.editReply({
         content:
-          `✅ อนุญาต <@${userId}> ให้เข้าห้องแล้ว`,
+          `✅ อนุญาต <@${userId}> ให้เข้าห้อง <#${channelId}> แล้ว`,
       });
 
       return;
@@ -115,7 +137,7 @@ export async function execute(
 
       await interaction.editReply({
         content:
-          `🚫 Ban <@${userId}> จาก Temporary Voice Room แล้ว`,
+          `🚫 Ban <@${userId}> จาก <#${channelId}> แล้ว`,
       });
 
       return;
@@ -135,7 +157,7 @@ export async function execute(
 
       await interaction.editReply({
         content:
-          `👑 โอน Ownership ให้ <@${userId}> แล้ว`,
+          `👑 โอน Ownership ของ <#${channelId}> ให้ <@${userId}> แล้ว`,
       });
 
       return;

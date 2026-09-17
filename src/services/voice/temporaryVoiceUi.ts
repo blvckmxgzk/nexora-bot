@@ -11,23 +11,12 @@ import {
 } from "discord.js";
 
 type RoomLike = {
-  channelId:
-    string;
-
-  ownerId:
-    string;
-
-  locked:
-    boolean;
-
-  hidden:
-    boolean;
-
-  userLimit:
-    number;
-
-  bitrate:
-    number;
+  channelId: string;
+  ownerId: string;
+  locked: boolean;
+  hidden: boolean;
+  userLimit: number;
+  bitrate: number;
 };
 
 export type TemporaryVoiceUserAction =
@@ -41,95 +30,80 @@ export type TemporaryVoiceModalAction =
   | "limit"
   | "bitrate";
 
-export function buildTemporaryVoicePanelEmbed(
-  room:
-    RoomLike,
+export const TEMP_VOICE_PANEL_TITLE =
+  "🎛️ NEXORA Temporary Voice Control";
 
-  channel:
-    VoiceChannel,
-) {
+export function buildTemporaryVoiceStaticPanelEmbed() {
   return new EmbedBuilder()
     .setColor(
       0x5338e8,
     )
     .setTitle(
-      "🔊 NEXORA Temporary Voice",
+      TEMP_VOICE_PANEL_TITLE,
     )
     .setDescription(
       [
-        `**Room:** <#${channel.id}>`,
-        `**Owner:** <@${room.ownerId}>`,
+        "จัดการ **Temporary Voice Room** ของคุณจากพาแนลนี้ได้ตลอดเวลา",
         "",
-        "ใช้ปุ่มด้านล่างเพื่อจัดการห้องของคุณ",
+        "ระบบจะค้นหาห้องที่คุณเป็น **Owner อยู่ในขณะกดปุ่ม** โดยอัตโนมัติ",
+        "ไม่ต้องใช้ `/voice panel` และไม่ต้องสร้างพาแนลใหม่ทุกครั้ง",
+        "",
+        "หากยังไม่มีห้อง ให้เข้า **➕・สร้างห้องส่วนตัว** ก่อน",
       ].join(
         "\n",
       ),
     )
     .addFields(
       {
-        name:
-          "🔒 Lock",
-        value:
-          room.locked
-            ? "Locked"
-            : "Unlocked",
-        inline:
-          true,
-      },
-
-      {
-        name:
-          "👁️ Visibility",
-        value:
-          room.hidden
-            ? "Hidden"
-            : "Visible",
-        inline:
-          true,
-      },
-
-      {
-        name:
+        name: "⚙️ Room",
+        value: [
+          "✏️ Rename",
           "👥 User Limit",
-        value:
-          room.userLimit ===
-            0
-            ? "Unlimited"
-            : String(
-                room.userLimit,
-              ),
-        inline:
-          true,
+          "🎙️ Bitrate",
+        ].join(
+          "\n",
+        ),
+        inline: true,
       },
 
       {
-        name:
-          "🎙️ Bitrate",
-        value:
-          `${Math.round(channel.bitrate / 1000)} kbps`,
-        inline:
-          true,
+        name: "🔐 Privacy",
+        value: [
+          "🔒 Lock / Unlock",
+          "🙈 Hide / Show",
+          "✅ Allow Access",
+        ].join(
+          "\n",
+        ),
+        inline: true,
+      },
+
+      {
+        name: "👑 Ownership",
+        value: [
+          "➖ Remove Access",
+          "🚫 Room Ban",
+          "👑 Transfer",
+          "🗑️ Delete",
+        ].join(
+          "\n",
+        ),
+        inline: true,
       },
     )
     .setFooter({
       text:
-        "ห้องจะถูกลบทันทีเมื่อไม่มีสมาชิกอยู่ในห้อง",
+        "NEXORA • 1 Member = 1 Temporary Voice Room • Empty Room = Auto Delete",
     });
 }
 
-export function buildTemporaryVoicePanel(
-  room:
-    RoomLike,
-) {
-  const channelId =
-    room.channelId;
-
+export function buildTemporaryVoiceStaticPanel() {
   const first =
     new ActionRowBuilder<ButtonBuilder>()
       .addComponents(
         new ButtonBuilder()
           .setCustomId(
-            `tempvoice:rename:${channelId}`,
+            "tempvoice:rename",
           )
           .setLabel(
             "Rename",
@@ -138,13 +112,12 @@ export function buildTemporaryVoicePanel(
             "✏️",
           )
           .setStyle(
-            ButtonStyle
-              .Secondary,
+            ButtonStyle.Secondary,
           ),
 
         new ButtonBuilder()
           .setCustomId(
-            `tempvoice:limit:${channelId}`,
+            "tempvoice:limit",
           )
           .setLabel(
             "User Limit",
@@ -153,13 +126,12 @@ export function buildTemporaryVoicePanel(
             "👥",
           )
           .setStyle(
-            ButtonStyle
-              .Secondary,
+            ButtonStyle.Secondary,
           ),
 
         new ButtonBuilder()
           .setCustomId(
-            `tempvoice:bitrate:${channelId}`,
+            "tempvoice:bitrate",
           )
           .setLabel(
             "Bitrate",
@@ -168,49 +140,35 @@ export function buildTemporaryVoicePanel(
             "🎙️",
           )
           .setStyle(
-            ButtonStyle
-              .Secondary,
+            ButtonStyle.Secondary,
           ),
 
         new ButtonBuilder()
           .setCustomId(
-            `tempvoice:lock:${channelId}`,
+            "tempvoice:lock",
           )
           .setLabel(
-            room.locked
-              ? "Unlock"
-              : "Lock",
+            "Lock / Unlock",
           )
           .setEmoji(
-            room.locked
-              ? "🔓"
-              : "🔒",
+            "🔒",
           )
           .setStyle(
-            room.locked
-              ? ButtonStyle
-                  .Success
-              : ButtonStyle
-                  .Secondary,
+            ButtonStyle.Secondary,
           ),
 
         new ButtonBuilder()
           .setCustomId(
-            `tempvoice:hide:${channelId}`,
+            "tempvoice:hide",
           )
           .setLabel(
-            room.hidden
-              ? "Show"
-              : "Hide",
+            "Hide / Show",
           )
           .setEmoji(
-            room.hidden
-              ? "👁️"
-              : "🙈",
+            "🙈",
           )
           .setStyle(
-            ButtonStyle
-              .Secondary,
+            ButtonStyle.Secondary,
           ),
       );
 
@@ -219,7 +177,7 @@ export function buildTemporaryVoicePanel(
       .addComponents(
         new ButtonBuilder()
           .setCustomId(
-            `tempvoice:allow:${channelId}`,
+            "tempvoice:allow",
           )
           .setLabel(
             "Allow",
@@ -228,13 +186,12 @@ export function buildTemporaryVoicePanel(
             "✅",
           )
           .setStyle(
-            ButtonStyle
-              .Secondary,
+            ButtonStyle.Secondary,
           ),
 
         new ButtonBuilder()
           .setCustomId(
-            `tempvoice:remove:${channelId}`,
+            "tempvoice:remove",
           )
           .setLabel(
             "Remove",
@@ -243,13 +200,12 @@ export function buildTemporaryVoicePanel(
             "➖",
           )
           .setStyle(
-            ButtonStyle
-              .Secondary,
+            ButtonStyle.Secondary,
           ),
 
         new ButtonBuilder()
           .setCustomId(
-            `tempvoice:ban:${channelId}`,
+            "tempvoice:ban",
           )
           .setLabel(
             "Ban",
@@ -258,13 +214,12 @@ export function buildTemporaryVoicePanel(
             "🚫",
           )
           .setStyle(
-            ButtonStyle
-              .Secondary,
+            ButtonStyle.Secondary,
           ),
 
         new ButtonBuilder()
           .setCustomId(
-            `tempvoice:transfer:${channelId}`,
+            "tempvoice:transfer",
           )
           .setLabel(
             "Transfer",
@@ -273,13 +228,12 @@ export function buildTemporaryVoicePanel(
             "👑",
           )
           .setStyle(
-            ButtonStyle
-              .Primary,
+            ButtonStyle.Primary,
           ),
 
         new ButtonBuilder()
           .setCustomId(
-            `tempvoice:delete:${channelId}`,
+            "tempvoice:delete",
           )
           .setLabel(
             "Delete",
@@ -288,8 +242,7 @@ export function buildTemporaryVoicePanel(
             "🗑️",
           )
           .setStyle(
-            ButtonStyle
-              .Danger,
+            ButtonStyle.Danger,
           ),
       );
 
@@ -299,12 +252,66 @@ export function buildTemporaryVoicePanel(
   ];
 }
 
-export function buildTemporaryVoiceUserPicker(
-  action:
-    TemporaryVoiceUserAction,
+export function buildTemporaryVoiceStatusEmbed(
+  room: RoomLike,
+  channel: VoiceChannel,
+) {
+  return new EmbedBuilder()
+    .setColor(
+      0x5338e8,
+    )
+    .setTitle(
+      "🔊 Temporary Voice Status",
+    )
+    .setDescription(
+      [
+        `**Room:** <#${channel.id}>`,
+        `**Owner:** <@${room.ownerId}>`,
+      ].join(
+        "\n",
+      ),
+    )
+    .addFields(
+      {
+        name: "🔒 Access",
+        value:
+          room.locked
+            ? "Locked"
+            : "Unlocked",
+        inline: true,
+      },
 
-  channelId:
-    string,
+      {
+        name: "👁️ Visibility",
+        value:
+          room.hidden
+            ? "Hidden"
+            : "Visible",
+        inline: true,
+      },
+
+      {
+        name: "👥 Limit",
+        value:
+          room.userLimit === 0
+            ? "Unlimited"
+            : String(
+                room.userLimit,
+              ),
+        inline: true,
+      },
+
+      {
+        name: "🎙️ Bitrate",
+        value:
+          `${Math.round(channel.bitrate / 1000)} kbps`,
+        inline: true,
+      },
+    );
+}
+
+export function buildTemporaryVoiceUserPicker(
+  action: TemporaryVoiceUserAction,
 ) {
   const labels:
     Record<
@@ -328,12 +335,10 @@ export function buildTemporaryVoiceUserPicker(
     .addComponents(
       new UserSelectMenuBuilder()
         .setCustomId(
-          `tempvoice-user:${action}:${channelId}`,
+          `tempvoice-user:${action}`,
         )
         .setPlaceholder(
-          labels[
-            action
-          ],
+          labels[action],
         )
         .setMinValues(
           1,
@@ -345,16 +350,12 @@ export function buildTemporaryVoiceUserPicker(
 }
 
 export function buildTemporaryVoiceModal(
-  action:
-    TemporaryVoiceModalAction,
-
-  channelId:
-    string,
+  action: TemporaryVoiceModalAction,
 ) {
   const modal =
     new ModalBuilder()
       .setCustomId(
-        `tempvoice-modal:${action}:${channelId}`,
+        `tempvoice-modal:${action}`,
       );
 
   const input =
@@ -363,8 +364,7 @@ export function buildTemporaryVoiceModal(
         "value",
       )
       .setStyle(
-        TextInputStyle
-          .Short,
+        TextInputStyle.Short,
       )
       .setRequired(
         true,

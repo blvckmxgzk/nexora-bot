@@ -8,9 +8,11 @@ import {
 } from "../../services/voice/temporaryVoiceService.js";
 
 import {
+  temporaryVoicePanelService,
+} from "../../services/voice/temporaryVoicePanelService.js";
+
+import {
   buildTemporaryVoiceModal,
-  buildTemporaryVoicePanel,
-  buildTemporaryVoicePanelEmbed,
   buildTemporaryVoiceUserPicker,
   type TemporaryVoiceModalAction,
   type TemporaryVoiceUserAction,
@@ -26,7 +28,6 @@ export async function execute(
   const [
     namespace,
     action,
-    channelId,
   ] =
     interaction.customId
       .split(
@@ -36,21 +37,24 @@ export async function execute(
   if (
     namespace !==
       "tempvoice" ||
-    !action ||
-    !channelId
+    !action
   ) {
     await interaction.reply({
       content:
         "❌ Temporary Voice action ไม่ถูกต้อง",
 
       flags:
-        MessageFlags
-          .Ephemeral,
+        MessageFlags.Ephemeral,
     });
 
     return;
   }
 
+  /*
+   * Modal actions must acknowledge with showModal()
+   * immediately. The owner's CURRENT room is resolved
+   * again when the modal is submitted.
+   */
   if (
     action ===
       "rename" ||
@@ -63,13 +67,16 @@ export async function execute(
       buildTemporaryVoiceModal(
         action as
           TemporaryVoiceModalAction,
-        channelId,
       ),
     );
 
     return;
   }
 
+  /*
+   * User picker is also a new interaction.
+   * The room is resolved when the user is selected.
+   */
   if (
     action ===
       "allow" ||
@@ -85,14 +92,12 @@ export async function execute(
         "เลือกสมาชิก 1 คน:",
 
       flags:
-        MessageFlags
-          .Ephemeral,
+        MessageFlags.Ephemeral,
 
       components: [
         buildTemporaryVoiceUserPicker(
           action as
             TemporaryVoiceUserAction,
-          channelId,
         ),
       ],
     });
@@ -100,16 +105,51 @@ export async function execute(
     return;
   }
 
-  await interaction.deferUpdate();
+  /*
+   * Direct actions ACK immediately, then resolve
+   * whichever room the clicking user CURRENTLY owns.
+   */
+  await interaction.deferReply({
+    flags:
+      MessageFlags.Ephemeral,
+  });
 
   try {
-    if (
-      !interaction.guild
-    ) {
+    if (!interaction.guild) {
       throw new Error(
         "ใช้ Temporary Voice ได้เฉพาะใน Server",
       );
     }
+
+    const state =
+      await temporaryVoiceService
+        .getOwnedRoomState(
+          interaction.guild,
+          interaction.user.id,
+        );
+
+    if (!state) {
+      const panel =
+        await temporaryVoicePanelService
+          .ensurePanel(
+            interaction.guild,
+          );
+
+      await interaction.editReply({
+        content: [
+          "🔊 คุณยังไม่มี Temporary Voice Room",
+          "",
+          `เข้า <#${panel.hub.id}> เพื่อสร้างห้องก่อน`,
+        ].join(
+          "\n",
+        ),
+      });
+
+      return;
+    }
+
+    const channelId =
+      state.channel.id;
 
     if (
       action ===
@@ -124,66 +164,65 @@ export async function execute(
 
       await interaction.editReply({
         content:
-          "🗑️ ลบ Temporary Voice Room แล้ว",
-
-        embeds:
-          [],
-
-        components:
-          [],
+          "🗑️ ลบ Temporary Voice Room ของคุณแล้ว",
       });
 
       return;
     }
 
-    const result =
+    if (
       action ===
-        "lock"
-        ? await temporaryVoiceService
-            .toggleLock(
-              interaction.guild,
-              interaction.user.id,
-              channelId,
-            )
-        : action ===
-            "hide"
-          ? await temporaryVoiceService
-              .toggleHide(
-                interaction.guild,
-                interaction.user.id,
-                channelId,
-              )
-          : null;
+      "lock"
+    ) {
+      const result =
+        await temporaryVoiceService
+          .toggleLock(
+            interaction.guild,
+            interaction.user.id,
+            channelId,
+          );
 
-    if (!result) {
-      throw new Error(
-        "ไม่รู้จัก Temporary Voice action นี้",
-      );
+      await interaction.editReply({
+        content:
+          result.room.locked
+            ? `🔒 ล็อก <#${result.channel.id}> แล้ว`
+            : `🔓 ปลดล็อก <#${result.channel.id}> แล้ว`,
+      });
+
+      return;
     }
 
-    await interaction.editReply({
-      embeds: [
-        buildTemporaryVoicePanelEmbed(
-          result.room as any,
-          result.channel,
-        ),
-      ],
+    if (
+      action ===
+      "hide"
+    ) {
+      const result =
+        await temporaryVoiceService
+          .toggleHide(
+            interaction.guild,
+            interaction.user.id,
+            channelId,
+          );
 
-      components:
-        buildTemporaryVoicePanel(
-          result.room as any,
-        ),
-    });
+      await interaction.editReply({
+        content:
+          result.room.hidden
+            ? `🙈 ซ่อน <#${result.channel.id}> แล้ว`
+            : `👁️ แสดง <#${result.channel.id}> แล้ว`,
+      });
+
+      return;
+    }
+
+    throw new Error(
+      "ไม่รู้จัก Temporary Voice action นี้",
+    );
   } catch (
     error
   ) {
-    await interaction.followUp({
+    await interaction.editReply({
       content:
         `❌ ${error instanceof Error ? error.message : String(error)}`,
-
-      flags:
-        MessageFlags
-          .Ephemeral,
     });
   }
 }

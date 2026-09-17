@@ -7,6 +7,10 @@ import {
   temporaryVoiceService,
 } from "../../services/voice/temporaryVoiceService.js";
 
+import {
+  temporaryVoicePanelService,
+} from "../../services/voice/temporaryVoicePanelService.js";
+
 export const customId =
   "tempvoice-modal:";
 
@@ -16,14 +20,11 @@ export async function execute(
 ): Promise<void> {
   await interaction.deferReply({
     flags:
-      MessageFlags
-        .Ephemeral,
+      MessageFlags.Ephemeral,
   });
 
   try {
-    if (
-      !interaction.guild
-    ) {
+    if (!interaction.guild) {
       throw new Error(
         "ใช้ Temporary Voice ได้เฉพาะใน Server",
       );
@@ -32,7 +33,6 @@ export async function execute(
     const [
       namespace,
       action,
-      channelId,
     ] =
       interaction.customId
         .split(
@@ -42,13 +42,37 @@ export async function execute(
     if (
       namespace !==
         "tempvoice-modal" ||
-      !action ||
-      !channelId
+      !action
     ) {
       throw new Error(
         "Temporary Voice modal ไม่ถูกต้อง",
       );
     }
+
+    const state =
+      await temporaryVoiceService
+        .getOwnedRoomState(
+          interaction.guild,
+          interaction.user.id,
+        );
+
+    if (!state) {
+      const panel =
+        await temporaryVoicePanelService
+          .ensurePanel(
+            interaction.guild,
+          );
+
+      await interaction.editReply({
+        content:
+          `❌ คุณยังไม่มีห้อง กรุณาเข้า <#${panel.hub.id}> ก่อน`,
+      });
+
+      return;
+    }
+
+    const channelId =
+      state.channel.id;
 
     const raw =
       interaction.fields
@@ -97,8 +121,7 @@ export async function execute(
 
       await interaction.editReply({
         content:
-          value ===
-            0
+          value === 0
             ? "👥 ปิด User Limit แล้ว"
             : `👥 ตั้ง User Limit เป็น **${value}** แล้ว`,
       });
