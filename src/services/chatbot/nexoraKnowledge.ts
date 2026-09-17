@@ -89,14 +89,17 @@ NEXORA จะทำหน้าที่เป็นตัวกลางใน�
     ],
 
     content: `
-Temporary Voice ใช้ระบบ Join-to-Create
+Temporary Voice ใช้ระบบ Join-to-Create ผ่านห้อง ➕・สร้างห้องส่วนตัว
 สมาชิกหนึ่งคนเป็นเจ้าของห้องชั่วคราวได้สูงสุด 1 ห้อง
+หากมีห้องอยู่แล้ว ระบบจะย้ายเจ้าของกลับไปยังห้องเดิมแทนการสร้างซ้ำ
 
-Owner สามารถ Rename, ตั้ง User Limit, Lock/Unlock,
-Hide/Show, Allow/Remove Access, Ban เฉพาะห้อง,
-ปรับ Bitrate, Transfer Ownership และลบห้องได้
+Owner ใช้ /voice panel เพื่อ Rename, ตั้ง User Limit,
+ปรับ Bitrate, Lock/Unlock, Hide/Show, Allow/Remove Access,
+Ban เฉพาะห้อง, Transfer Ownership และลบห้องได้
 
 เมื่อห้องเหลือสมาชิก 0 คน ห้องจะถูกลบทันที
+หาก Owner ออกแต่ยังมีสมาชิกอยู่ ระบบจะรอ Owner Grace
+ก่อนโอน Ownership ให้สมาชิกที่ยังอยู่ในห้อง
 `.trim(),
   },
 

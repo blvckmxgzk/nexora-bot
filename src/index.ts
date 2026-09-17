@@ -62,6 +62,10 @@ import {
   communityLoggingRuntime,
 } from "./services/logging/communityLoggingRuntime.js";
 
+import {
+  temporaryVoiceRuntime,
+} from "./services/voice/temporaryVoiceRuntime.js";
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -127,6 +131,7 @@ async function bootstrap(): Promise<void> {
   memberLifecycleRuntime.start(client);
   nexoraChatbotRuntime.start(client);
   communityLoggingRuntime.start(client);
+  temporaryVoiceRuntime.start(client);
 
 setMarketplaceDiscordClient(
     client,
@@ -211,6 +216,7 @@ await interactionHandler.loadInteractions(
       payoutReconciliationWorker.stop();
     disputeReconciliationWorker.stop();
 
+      temporaryVoiceRuntime.stop();
       communityLoggingRuntime.stop();
       nexoraChatbotRuntime.stop();
       memberLifecycleRuntime.stop();

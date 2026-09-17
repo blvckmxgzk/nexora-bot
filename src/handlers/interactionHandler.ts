@@ -22,6 +22,11 @@ import {
   autoModService,
 } from "../services/community/autoModService.js";
 
+import {
+  installInteractionDeadlineGuard,
+  isUnknownInteractionError,
+} from "../utils/interactionDeadlineGuard.js";
+
 export interface NEXORAInteraction {
   customId: string;
 
@@ -221,6 +226,13 @@ export class InteractionHandler {
   private async handleInteraction(
     interaction: Interaction,
   ): Promise<void> {
+    const cleanupAckGuard =
+      interaction.isChatInputCommand()
+        ? installInteractionDeadlineGuard(
+            interaction,
+          )
+        : () => undefined;
+
     try {
       if (
         (
@@ -419,6 +431,18 @@ export class InteractionHandler {
         );
       }
     } catch (error) {
+      if (
+        isUnknownInteractionError(
+          error,
+        )
+      ) {
+        console.warn(
+          `⌛ Interaction expired before acknowledgement: ${interaction.id}`,
+        );
+
+        return;
+      }
+
       console.error(
         `❌ Interaction failed: ${interaction.id}`,
         error,
@@ -458,6 +482,8 @@ export class InteractionHandler {
           replyError,
         );
       }
+    } finally {
+      cleanupAckGuard();
     }
   }
 }
