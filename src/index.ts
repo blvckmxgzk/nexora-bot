@@ -52,15 +52,11 @@ import {
 } from "./services/marketplace/marketplaceNotificationService.js";
 
 
-import {
-  setMinerDiscordClient,
-} from "./services/nexo/minerRareDropNotificationService.js";
-
-import {
-  minerSettlementWorker,
-} from "./services/nexo/minerSettlementWorker.js";
-
 import { memberLifecycleRuntime } from "./services/community/memberLifecycleRuntime.js";
+
+import {
+  nexoraChatbotRuntime,
+} from "./services/chatbot/nexoraChatbotRuntime.js";
 
 import {
   communityLoggingRuntime,
@@ -74,6 +70,9 @@ const client = new Client({
       : []),
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
+    ...(env.NEXORA_MESSAGE_CONTENT_INTENT
+      ? [GatewayIntentBits.MessageContent]
+      : []),
     GatewayIntentBits.AutoModerationConfiguration,
     GatewayIntentBits.AutoModerationExecution,
     GatewayIntentBits.GuildModeration,
@@ -126,22 +125,17 @@ async function bootstrap(): Promise<void> {
   );
 
   memberLifecycleRuntime.start(client);
+  nexoraChatbotRuntime.start(client);
   communityLoggingRuntime.start(client);
 
 setMarketplaceDiscordClient(
     client,
   );
-
-
-  setMinerDiscordClient(
+await interactionHandler.loadInteractions(
     client,
   );
 
-  await interactionHandler.loadInteractions(
-    client,
-  );
-
-  minerSettlementWorker.start();
+  
   paymentExpirationWorker.start();
   payoutReconciliationWorker.start();
   disputeReconciliationWorker.start();
@@ -210,7 +204,7 @@ setMarketplaceDiscordClient(
         );
       }
 
-      minerSettlementWorker.stop();
+      
       notificationDeliveryWorker.stop();
       marketplaceOpsMonitorWorker.stop();
       paymentExpirationWorker.stop();
@@ -218,6 +212,7 @@ setMarketplaceDiscordClient(
     disputeReconciliationWorker.stop();
 
       communityLoggingRuntime.stop();
+      nexoraChatbotRuntime.stop();
       memberLifecycleRuntime.stop();
 
 client.destroy();

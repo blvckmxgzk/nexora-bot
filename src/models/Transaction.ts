@@ -35,6 +35,9 @@ const transactionSchema =
           "adjustment",
           "miner_sell",
           "miner_upgrade",
+          "dungeon_reward",
+          "dungeon_upgrade",
+          "dungeon_craft",
           "trade",
         ],
 

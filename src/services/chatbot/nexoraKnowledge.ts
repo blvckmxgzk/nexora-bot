@@ -130,7 +130,7 @@ Discord Onboarding เป็นผู้จัดการเรื่อง Rol
     ],
 
     content: `
-Economy Game ของ NEXORA กำลังเปลี่ยนจาก Miner ไปเป็น Dungeon/RPG
+Economy Game ของ NEXORA คือ NEXORA Dungeons เกมแนว Dungeon/RPG
 
 แนวทางหลัก:
 - NEXO = เงิน

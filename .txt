@@ -1,0 +1,5803 @@
+bash <<'BASH'
+set -euo pipefail
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "⚔️ NEXORA DUNGEONS MIGRATION"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+mkdir -p \
+  src/game/nexoDungeons \
+  src/models \
+  src/services/dungeons \
+  src/commands \
+  legacy/nexo-miner
+
+# ============================================================
+# 1. ARCHIVE OLD MINER COMMANDS / INTERACTIONS
+#    เก็บ source เดิมไว้ ไม่ลบ DB / models / services
+# ============================================================
+
+python3 - <<'PY'
+from pathlib import Path
+import re
+import shutil
+
+roots = [
+    Path("src/commands"),
+    Path("src/interactions"),
+]
+
+patterns = [
+    re.compile(r'game/nexoMiner', re.I),
+    re.compile(r'services/nexo/miner', re.I),
+    re.compile(r'models/Miner', re.I),
+    re.compile(r'\bminerService\b', re.I),
+    re.compile(r'\bminerTradeService\b', re.I),
+    re.compile(r'\bminerLootService\b', re.I),
+    re.compile(r'\bminerProgressionService\b', re.I),
+    re.compile(r'\bminerBoostService\b', re.I),
+    re.compile(r'\bMinerProfile\b'),
+    re.compile(r'\bMinerPickaxe\b'),
+    re.compile(r'\bMinerOreStack\b'),
+    re.compile(r'\bNEXO Miner\b', re.I),
+]
+
+moved = []
+
+for root in roots:
+    if not root.exists():
+        continue
+
+    for path in list(root.rglob("*.ts")):
+        if path.name == "dungeon.ts":
+            continue
+
+        text = path.read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+
+        path_has_miner_name = any(
+            "miner" in part.lower()
+            for part in path.parts
+        )
+
+        content_has_miner = any(
+            pattern.search(text)
+            for pattern in patterns
+        )
+
+        if not (
+            path_has_miner_name or
+            content_has_miner
+        ):
+            continue
+
+        relative = path.relative_to("src")
+
+        destination = (
+            Path("legacy/nexo-miner") /
+            relative
+        )
+
+        destination.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        shutil.move(
+            str(path),
+            str(destination),
+        )
+
+        moved.append(
+            str(path),
+        )
+
+print(
+    f"📦 Archived {len(moved)} Miner command/interaction file(s)"
+)
+
+for item in moved:
+    print(f"   → {item}")
+PY
+
+# ============================================================
+# 2. DUNGEON CATALOG
+# ============================================================
+
+cat > src/game/nexoDungeons/catalog.ts <<'EOF'
+export const DUNGEON_WEAPON_TYPES = [
+  "sword",
+  "greatsword",
+  "bow",
+  "staff",
+  "dagger",
+  "shield",
+] as const;
+
+export type DungeonWeaponType =
+  typeof DUNGEON_WEAPON_TYPES[number];
+
+export const DUNGEON_SLOTS = [
+  "weapon",
+  "helmet",
+  "armor",
+  "gloves",
+  "boots",
+  "ring",
+  "necklace",
+  "artifact",
+] as const;
+
+export type DungeonSlot =
+  typeof DUNGEON_SLOTS[number];
+
+export const DUNGEON_RARITIES = [
+  "common",
+  "uncommon",
+  "rare",
+  "epic",
+  "legendary",
+  "mythic",
+  "ancient",
+  "divine",
+] as const;
+
+export type DungeonRarity =
+  typeof DUNGEON_RARITIES[number];
+
+export const DUNGEON_DIFFICULTIES = [
+  "normal",
+  "hard",
+  "nightmare",
+  "abyss",
+] as const;
+
+export type DungeonDifficulty =
+  typeof DUNGEON_DIFFICULTIES[number];
+
+export const RARITY_DATA: Record<
+  DungeonRarity,
+  {
+    name: string;
+    emoji: string;
+    multiplier: number;
+  }
+> = {
+  common: {
+    name: "Common",
+    emoji: "⚪",
+    multiplier: 1,
+  },
+
+  uncommon: {
+    name: "Uncommon",
+    emoji: "🟢",
+    multiplier: 1.2,
+  },
+
+  rare: {
+    name: "Rare",
+    emoji: "🔵",
+    multiplier: 1.5,
+  },
+
+  epic: {
+    name: "Epic",
+    emoji: "🟣",
+    multiplier: 1.9,
+  },
+
+  legendary: {
+    name: "Legendary",
+    emoji: "🟠",
+    multiplier: 2.5,
+  },
+
+  mythic: {
+    name: "Mythic",
+    emoji: "🔴",
+    multiplier: 3.3,
+  },
+
+  ancient: {
+    name: "Ancient",
+    emoji: "🟡",
+    multiplier: 4.4,
+  },
+
+  divine: {
+    name: "Divine",
+    emoji: "💠",
+    multiplier: 6,
+  },
+};
+
+export const WEAPON_DATA: Record<
+  DungeonWeaponType,
+  {
+    name: string;
+    emoji: string;
+    description: string;
+  }
+> = {
+  sword: {
+    name: "Sword",
+    emoji: "⚔️",
+    description:
+      "สมดุล และมีโอกาสทำ Bleed",
+  },
+
+  greatsword: {
+    name: "Greatsword",
+    emoji: "🗡️",
+    description:
+      "โจมตีหนัก Damage สูง",
+  },
+
+  bow: {
+    name: "Bow",
+    emoji: "🏹",
+    description:
+      "Critical สูงและแม่นยำ",
+  },
+
+  staff: {
+    name: "Staff",
+    emoji: "🪄",
+    description:
+      "Magic Damage และ Burn",
+  },
+
+  dagger: {
+    name: "Dagger",
+    emoji: "🔪",
+    description:
+      "Critical และ Dodge สูง",
+  },
+
+  shield: {
+    name: "Shield",
+    emoji: "🛡️",
+    description:
+      "Tank, Block และ Defense",
+  },
+};
+
+export const SLOT_NAMES: Record<
+  DungeonSlot,
+  string
+> = {
+  weapon: "Weapon",
+  helmet: "Helmet",
+  armor: "Armor",
+  gloves: "Gloves",
+  boots: "Boots",
+  ring: "Ring",
+  necklace: "Necklace",
+  artifact: "Artifact",
+};
+
+export const DIFFICULTY_DATA: Record<
+  DungeonDifficulty,
+  {
+    name: string;
+    enemyMultiplier: number;
+    rewardMultiplier: number;
+    levelOffset: number;
+    rarityBonus: number;
+  }
+> = {
+  normal: {
+    name: "Normal",
+    enemyMultiplier: 1,
+    rewardMultiplier: 1,
+    levelOffset: 0,
+    rarityBonus: 0,
+  },
+
+  hard: {
+    name: "Hard",
+    enemyMultiplier: 1.45,
+    rewardMultiplier: 1.65,
+    levelOffset: 10,
+    rarityBonus: 0.35,
+  },
+
+  nightmare: {
+    name: "Nightmare",
+    enemyMultiplier: 2.1,
+    rewardMultiplier: 2.6,
+    levelOffset: 20,
+    rarityBonus: 0.8,
+  },
+
+  abyss: {
+    name: "Abyss",
+    enemyMultiplier: 3.2,
+    rewardMultiplier: 4.25,
+    levelOffset: 30,
+    rarityBonus: 1.5,
+  },
+};
+
+export interface DungeonDefinition {
+  id: string;
+  name: string;
+  emoji: string;
+  minLevel: number;
+  enemyPower: number;
+  baseXp: number;
+  baseNexo: number;
+  materialId: string;
+  materialName: string;
+}
+
+export const DUNGEONS:
+  DungeonDefinition[] = [
+    {
+      id: "forgotten_ruins",
+      name: "Forgotten Ruins",
+      emoji: "🏚️",
+      minLevel: 1,
+      enemyPower: 6,
+      baseXp: 45,
+      baseNexo: 80,
+      materialId: "ancient_fragment",
+      materialName: "Ancient Fragment",
+    },
+
+    {
+      id: "goblin_cavern",
+      name: "Goblin Cavern",
+      emoji: "👺",
+      minLevel: 10,
+      enemyPower: 13,
+      baseXp: 110,
+      baseNexo: 190,
+      materialId: "goblin_core",
+      materialName: "Goblin Core",
+    },
+
+    {
+      id: "haunted_forest",
+      name: "Haunted Forest",
+      emoji: "🌲",
+      minLevel: 20,
+      enemyPower: 24,
+      baseXp: 220,
+      baseNexo: 380,
+      materialId: "spirit_essence",
+      materialName: "Spirit Essence",
+    },
+
+    {
+      id: "crimson_castle",
+      name: "Crimson Castle",
+      emoji: "🏰",
+      minLevel: 35,
+      enemyPower: 42,
+      baseXp: 420,
+      baseNexo: 720,
+      materialId: "crimson_shard",
+      materialName: "Crimson Shard",
+    },
+
+    {
+      id: "abyssal_depths",
+      name: "Abyssal Depths",
+      emoji: "🌊",
+      minLevel: 50,
+      enemyPower: 67,
+      baseXp: 760,
+      baseNexo: 1250,
+      materialId: "abyss_core",
+      materialName: "Abyss Core",
+    },
+
+    {
+      id: "celestial_temple",
+      name: "Celestial Temple",
+      emoji: "⛩️",
+      minLevel: 70,
+      enemyPower: 105,
+      baseXp: 1350,
+      baseNexo: 2300,
+      materialId: "celestial_crystal",
+      materialName: "Celestial Crystal",
+    },
+
+    {
+      id: "void_realm",
+      name: "Void Realm",
+      emoji: "🌌",
+      minLevel: 90,
+      enemyPower: 160,
+      baseXp: 2300,
+      baseNexo: 4100,
+      materialId: "void_fragment",
+      materialName: "Void Fragment",
+    },
+
+    {
+      id: "eternal_nexus",
+      name: "Eternal Nexus",
+      emoji: "🌀",
+      minLevel: 110,
+      enemyPower: 240,
+      baseXp: 3900,
+      baseNexo: 7200,
+      materialId: "nexus_core",
+      materialName: "Nexus Core",
+    },
+  ];
+
+export const DUNGEON_MAP =
+  new Map(
+    DUNGEONS.map(
+      (dungeon) => [
+        dungeon.id,
+        dungeon,
+      ],
+    ),
+  );
+
+export const MATERIALS =
+  DUNGEONS.map(
+    (dungeon) => ({
+      id: dungeon.materialId,
+      name: dungeon.materialName,
+    }),
+  );
+EOF
+
+# ============================================================
+# 3. MODELS
+# ============================================================
+
+cat > src/models/DungeonProfile.ts <<'EOF'
+import {
+  Schema,
+  model,
+} from "mongoose";
+
+const equippedItemsSchema =
+  new Schema(
+    {
+      weapon: {
+        type: String,
+        default: null,
+      },
+
+      helmet: {
+        type: String,
+        default: null,
+      },
+
+      armor: {
+        type: String,
+        default: null,
+      },
+
+      gloves: {
+        type: String,
+        default: null,
+      },
+
+      boots: {
+        type: String,
+        default: null,
+      },
+
+      ring: {
+        type: String,
+        default: null,
+      },
+
+      necklace: {
+        type: String,
+        default: null,
+      },
+
+      artifact: {
+        type: String,
+        default: null,
+      },
+    },
+    {
+      _id: false,
+    },
+  );
+
+const dungeonProfileSchema =
+  new Schema(
+    {
+      discordId: {
+        type: String,
+        required: true,
+        unique: true,
+        index: true,
+      },
+
+      level: {
+        type: Number,
+        default: 1,
+        min: 1,
+        max: 120,
+        index: true,
+      },
+
+      xp: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      ascension: {
+        type: Number,
+        default: 0,
+        min: 0,
+        index: true,
+      },
+
+      ascensionPoints: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      equippedItems: {
+        type: equippedItemsSchema,
+        default: () => ({}),
+      },
+
+      totalRuns: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      successfulRuns: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      bossesDefeated: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      highestDungeonTier: {
+        type: Number,
+        default: 1,
+        min: 1,
+      },
+
+      createdCharacterAt: {
+        type: Date,
+        default: Date.now,
+      },
+
+      lastRunAt: {
+        type: Date,
+        default: null,
+        index: true,
+      },
+    },
+    {
+      timestamps: true,
+      versionKey: false,
+    },
+  );
+
+export const DungeonProfile =
+  model(
+    "DungeonProfile",
+    dungeonProfileSchema,
+  );
+EOF
+
+cat > src/models/DungeonItem.ts <<'EOF'
+import {
+  Schema,
+  model,
+} from "mongoose";
+
+import {
+  DUNGEON_RARITIES,
+  DUNGEON_SLOTS,
+  DUNGEON_WEAPON_TYPES,
+} from "../game/nexoDungeons/catalog.js";
+
+const statsSchema =
+  new Schema(
+    {
+      attack: {
+        type: Number,
+        default: 0,
+      },
+
+      defense: {
+        type: Number,
+        default: 0,
+      },
+
+      hp: {
+        type: Number,
+        default: 0,
+      },
+
+      critChance: {
+        type: Number,
+        default: 0,
+      },
+
+      critDamage: {
+        type: Number,
+        default: 0,
+      },
+
+      dodge: {
+        type: Number,
+        default: 0,
+      },
+    },
+    {
+      _id: false,
+    },
+  );
+
+const affixSchema =
+  new Schema(
+    {
+      key: {
+        type: String,
+        required: true,
+      },
+
+      label: {
+        type: String,
+        required: true,
+      },
+
+      value: {
+        type: Number,
+        required: true,
+      },
+    },
+    {
+      _id: false,
+    },
+  );
+
+const dungeonItemSchema =
+  new Schema(
+    {
+      instanceId: {
+        type: String,
+        required: true,
+        unique: true,
+        index: true,
+      },
+
+      discordId: {
+        type: String,
+        required: true,
+        index: true,
+      },
+
+      definitionId: {
+        type: String,
+        required: true,
+      },
+
+      name: {
+        type: String,
+        required: true,
+      },
+
+      slot: {
+        type: String,
+        enum: [
+          ...DUNGEON_SLOTS,
+        ],
+        required: true,
+        index: true,
+      },
+
+      weaponType: {
+        type: String,
+        enum: [
+          ...DUNGEON_WEAPON_TYPES,
+          null,
+        ],
+        default: null,
+      },
+
+      rarity: {
+        type: String,
+        enum: [
+          ...DUNGEON_RARITIES,
+        ],
+        required: true,
+        index: true,
+      },
+
+      itemLevel: {
+        type: Number,
+        required: true,
+        min: 1,
+      },
+
+      upgradeLevel: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 20,
+      },
+
+      stats: {
+        type: statsSchema,
+        default: () => ({}),
+      },
+
+      affixes: {
+        type: [
+          affixSchema,
+        ],
+        default: [],
+      },
+
+      equipped: {
+        type: Boolean,
+        default: false,
+        index: true,
+      },
+
+      tradeLocked: {
+        type: Boolean,
+        default: false,
+      },
+
+      source: {
+        type: String,
+        default: "dungeon",
+      },
+
+      obtainedAt: {
+        type: Date,
+        default: Date.now,
+      },
+    },
+    {
+      timestamps: true,
+      versionKey: false,
+    },
+  );
+
+dungeonItemSchema.index({
+  discordId: 1,
+  equipped: 1,
+});
+
+dungeonItemSchema.index({
+  discordId: 1,
+  rarity: 1,
+  itemLevel: -1,
+});
+
+export const DungeonItem =
+  model(
+    "DungeonItem",
+    dungeonItemSchema,
+  );
+EOF
+
+cat > src/models/DungeonMaterial.ts <<'EOF'
+import {
+  Schema,
+  model,
+} from "mongoose";
+
+const dungeonMaterialSchema =
+  new Schema(
+    {
+      discordId: {
+        type: String,
+        required: true,
+        index: true,
+      },
+
+      materialId: {
+        type: String,
+        required: true,
+      },
+
+      name: {
+        type: String,
+        required: true,
+      },
+
+      quantity: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+    },
+    {
+      timestamps: true,
+      versionKey: false,
+    },
+  );
+
+dungeonMaterialSchema.index(
+  {
+    discordId: 1,
+    materialId: 1,
+  },
+  {
+    unique: true,
+  },
+);
+
+export const DungeonMaterial =
+  model(
+    "DungeonMaterial",
+    dungeonMaterialSchema,
+  );
+EOF
+
+cat > src/models/DungeonRun.ts <<'EOF'
+import {
+  Schema,
+  model,
+} from "mongoose";
+
+const dungeonRunSchema =
+  new Schema(
+    {
+      runId: {
+        type: String,
+        required: true,
+        unique: true,
+        index: true,
+      },
+
+      discordId: {
+        type: String,
+        required: true,
+        index: true,
+      },
+
+      dungeonId: {
+        type: String,
+        required: true,
+        index: true,
+      },
+
+      difficulty: {
+        type: String,
+        required: true,
+      },
+
+      status: {
+        type: String,
+        enum: [
+          "completed",
+          "failed",
+        ],
+        required: true,
+        index: true,
+      },
+
+      rooms: {
+        type: [
+          Schema.Types.Mixed,
+        ],
+        default: [],
+      },
+
+      rewards: {
+        type:
+          Schema.Types.Mixed,
+
+        default: () => ({}),
+      },
+
+      startedAt: {
+        type: Date,
+        required: true,
+      },
+
+      completedAt: {
+        type: Date,
+        required: true,
+      },
+    },
+    {
+      timestamps: true,
+      versionKey: false,
+    },
+  );
+
+dungeonRunSchema.index({
+  discordId: 1,
+  createdAt: -1,
+});
+
+export const DungeonRun =
+  model(
+    "DungeonRun",
+    dungeonRunSchema,
+  );
+EOF
+
+# ============================================================
+# 4. DUNGEON SERVICE
+# ============================================================
+
+cat > src/services/dungeons/dungeonService.ts <<'EOF'
+import crypto from "node:crypto";
+
+import {
+  Economy,
+} from "../../models/Economy.js";
+
+import {
+  Transaction,
+} from "../../models/Transaction.js";
+
+import {
+  DungeonProfile,
+} from "../../models/DungeonProfile.js";
+
+import {
+  DungeonItem,
+} from "../../models/DungeonItem.js";
+
+import {
+  DungeonMaterial,
+} from "../../models/DungeonMaterial.js";
+
+import {
+  DungeonRun,
+} from "../../models/DungeonRun.js";
+
+import {
+  DIFFICULTY_DATA,
+  DUNGEONS,
+  DUNGEON_MAP,
+  DUNGEON_RARITIES,
+  DUNGEON_SLOTS,
+  MATERIALS,
+  RARITY_DATA,
+  SLOT_NAMES,
+  WEAPON_DATA,
+  type DungeonDifficulty,
+  type DungeonRarity,
+  type DungeonSlot,
+  type DungeonWeaponType,
+} from "../../game/nexoDungeons/catalog.js";
+
+import {
+  NexoNumber,
+} from "../nexo/NexoNumber.js";
+
+const activeRuns =
+  new Set<string>();
+
+function id(
+  prefix: string,
+): string {
+  return (
+    `${prefix}-` +
+    crypto
+      .randomBytes(8)
+      .toString("hex")
+      .toUpperCase()
+  );
+}
+
+function randomInt(
+  min: number,
+  max: number,
+): number {
+  return (
+    Math.floor(
+      Math.random() *
+      (
+        max -
+        min +
+        1
+      ),
+    ) +
+    min
+  );
+}
+
+function pick<T>(
+  values:
+    readonly T[],
+): T {
+  return values[
+    Math.floor(
+      Math.random() *
+      values.length,
+    )
+  ]!;
+}
+
+function clamp(
+  value: number,
+  min: number,
+  max: number,
+): number {
+  return Math.max(
+    min,
+    Math.min(
+      max,
+      value,
+    ),
+  );
+}
+
+function xpRequired(
+  level: number,
+): number {
+  if (
+    level >= 120
+  ) {
+    return 0;
+  }
+
+  const n =
+    Math.max(
+      1,
+      level,
+    );
+
+  return Math.floor(
+    100 +
+    n * 60 +
+    Math.pow(
+      n,
+      1.35,
+    ) *
+      15,
+  );
+}
+
+function applyXp(
+  profile: any,
+  amount: number,
+): {
+  levelsGained: number;
+} {
+  profile.xp +=
+    Math.max(
+      0,
+      Math.floor(
+        amount,
+      ),
+    );
+
+  let levelsGained =
+    0;
+
+  while (
+    profile.level <
+      120
+  ) {
+    const required =
+      xpRequired(
+        profile.level,
+      );
+
+    if (
+      profile.xp <
+      required
+    ) {
+      break;
+    }
+
+    profile.xp -=
+      required;
+
+    profile.level +=
+      1;
+
+    levelsGained +=
+      1;
+  }
+
+  if (
+    profile.level >=
+    120
+  ) {
+    profile.level =
+      120;
+  }
+
+  return {
+    levelsGained,
+  };
+}
+
+async function ensureEconomy(
+  discordId: string,
+) {
+  return Economy
+    .findOneAndUpdate(
+      {
+        discordId,
+      },
+      {
+        $setOnInsert: {
+          discordId,
+          balance:
+            "0",
+          bank:
+            "0",
+          reservedBalance:
+            "0",
+          lifetimeEarned:
+            "0",
+          lifetimeSpent:
+            "0",
+          inventory:
+            [],
+        },
+      },
+      {
+        upsert:
+          true,
+        new:
+          true,
+        setDefaultsOnInsert:
+          true,
+      },
+    );
+}
+
+async function awardNexo(
+  discordId: string,
+  amount: number,
+  description: string,
+  metadata:
+    Record<
+      string,
+      unknown
+    > = {},
+): Promise<string> {
+  const reward =
+    Math.max(
+      0,
+      Math.floor(
+        amount,
+      ),
+    );
+
+  const economy =
+    await ensureEconomy(
+      discordId,
+    );
+
+  if (!economy) {
+    throw new Error(
+      "ไม่สามารถโหลด Economy ได้",
+    );
+  }
+
+  const before =
+    new NexoNumber(
+      economy.balance,
+    );
+
+  const after =
+    before.add(
+      reward,
+    );
+
+  economy.balance =
+    after.toStorage();
+
+  economy.lifetimeEarned =
+    new NexoNumber(
+      economy.lifetimeEarned,
+    )
+      .add(
+        reward,
+      )
+      .toStorage();
+
+  await economy.save();
+
+  await Transaction.create({
+    transactionId:
+      id("DUNGEON"),
+
+    discordId,
+
+    type:
+      "dungeon_reward",
+
+    amount:
+      String(
+        reward,
+      ),
+
+    balanceBefore:
+      before.toStorage(),
+
+    balanceAfter:
+      after.toStorage(),
+
+    description,
+
+    metadata,
+  });
+
+  return after.toStorage();
+}
+
+async function spendNexo(
+  discordId: string,
+  amount: number,
+  description: string,
+  type:
+    "dungeon_upgrade" |
+    "dungeon_craft",
+  metadata:
+    Record<
+      string,
+      unknown
+    > = {},
+): Promise<string> {
+  const cost =
+    Math.max(
+      0,
+      Math.floor(
+        amount,
+      ),
+    );
+
+  const economy =
+    await ensureEconomy(
+      discordId,
+    );
+
+  if (!economy) {
+    throw new Error(
+      "ไม่สามารถโหลด Economy ได้",
+    );
+  }
+
+  const before =
+    new NexoNumber(
+      economy.balance,
+    );
+
+  if (
+    before.lt(
+      cost,
+    )
+  ) {
+    throw new Error(
+      `NEXO ไม่เพียงพอ ต้องใช้ ${cost.toLocaleString()} NEXO`,
+    );
+  }
+
+  const after =
+    before.sub(
+      cost,
+    );
+
+  economy.balance =
+    after.toStorage();
+
+  economy.lifetimeSpent =
+    new NexoNumber(
+      economy.lifetimeSpent,
+    )
+      .add(
+        cost,
+      )
+      .toStorage();
+
+  await economy.save();
+
+  await Transaction.create({
+    transactionId:
+      id("DUNGEON"),
+
+    discordId,
+
+    type,
+
+    amount:
+      String(
+        cost,
+      ),
+
+    balanceBefore:
+      before.toStorage(),
+
+    balanceAfter:
+      after.toStorage(),
+
+    description,
+
+    metadata,
+  });
+
+  return after.toStorage();
+}
+
+function rollRarity(
+  bonus = 0,
+): DungeonRarity {
+  const multiplier =
+    1 +
+    Math.max(
+      0,
+      bonus,
+    ) *
+      0.45;
+
+  const roll =
+    Math.random();
+
+  let cursor =
+    0;
+
+  const table: Array<
+    [
+      DungeonRarity,
+      number,
+    ]
+  > = [
+    [
+      "divine",
+      0.0005 *
+        multiplier,
+    ],
+
+    [
+      "ancient",
+      0.002 *
+        multiplier,
+    ],
+
+    [
+      "mythic",
+      0.008 *
+        multiplier,
+    ],
+
+    [
+      "legendary",
+      0.03 *
+        multiplier,
+    ],
+
+    [
+      "epic",
+      0.10 *
+        multiplier,
+    ],
+
+    [
+      "rare",
+      0.25 *
+        multiplier,
+    ],
+
+    [
+      "uncommon",
+      0.55,
+    ],
+  ];
+
+  for (
+    const [
+      rarity,
+      chance,
+    ] of table
+  ) {
+    cursor +=
+      chance;
+
+    if (
+      roll <=
+      cursor
+    ) {
+      return rarity;
+    }
+  }
+
+  return "common";
+}
+
+function affixCount(
+  rarity:
+    DungeonRarity,
+): number {
+  const index =
+    DUNGEON_RARITIES
+      .indexOf(
+        rarity,
+      );
+
+  if (
+    index < 2
+  ) {
+    return 0;
+  }
+
+  if (
+    index === 2
+  ) {
+    return 1;
+  }
+
+  if (
+    index <= 4
+  ) {
+    return 2;
+  }
+
+  if (
+    index <= 6
+  ) {
+    return 3;
+  }
+
+  return 4;
+}
+
+function createAffixes(
+  rarity:
+    DungeonRarity,
+  itemLevel:
+    number,
+) {
+  const pool = [
+    {
+      key:
+        "attack",
+      label:
+        "Attack",
+      scale:
+        0.7,
+    },
+
+    {
+      key:
+        "defense",
+      label:
+        "Defense",
+      scale:
+        0.5,
+    },
+
+    {
+      key:
+        "hp",
+      label:
+        "HP",
+      scale:
+        5,
+    },
+
+    {
+      key:
+        "critChance",
+      label:
+        "Critical Chance",
+      scale:
+        0.0025,
+    },
+
+    {
+      key:
+        "critDamage",
+      label:
+        "Critical Damage",
+      scale:
+        0.006,
+    },
+
+    {
+      key:
+        "dodge",
+      label:
+        "Dodge",
+      scale:
+        0.002,
+    },
+  ];
+
+  const selected =
+    [
+      ...pool,
+    ]
+      .sort(
+        () =>
+          Math.random() -
+          0.5,
+      )
+      .slice(
+        0,
+        affixCount(
+          rarity,
+        ),
+      );
+
+  const rarityMulti =
+    RARITY_DATA[
+      rarity
+    ].multiplier;
+
+  return selected.map(
+    (entry) => ({
+      key:
+        entry.key,
+
+      label:
+        entry.label,
+
+      value:
+        Number(
+          (
+            entry.scale *
+            Math.max(
+              1,
+              itemLevel,
+            ) *
+            rarityMulti *
+            (
+              0.8 +
+              Math.random() *
+                0.4
+            )
+          ).toFixed(
+            entry.key ===
+              "critChance" ||
+            entry.key ===
+              "critDamage" ||
+            entry.key ===
+              "dodge"
+              ? 4
+              : 2,
+          ),
+        ),
+    }),
+  );
+}
+
+function itemName(
+  slot:
+    DungeonSlot,
+  rarity:
+    DungeonRarity,
+  weaponType:
+    DungeonWeaponType |
+    null,
+): string {
+  const rarityName =
+    RARITY_DATA[
+      rarity
+    ].name;
+
+  if (
+    slot ===
+      "weapon" &&
+    weaponType
+  ) {
+    return `${rarityName} ${WEAPON_DATA[weaponType].name}`;
+  }
+
+  return `${rarityName} ${SLOT_NAMES[slot]}`;
+}
+
+function generateItemData(
+  discordId:
+    string,
+  options: {
+    itemLevel:
+      number;
+
+    rarity?:
+      DungeonRarity;
+
+    rarityBonus?:
+      number;
+
+    slot?:
+      DungeonSlot;
+
+    weaponType?:
+      DungeonWeaponType |
+      null;
+
+    source:
+      string;
+  },
+) {
+  const rarity =
+    options.rarity ??
+    rollRarity(
+      options.rarityBonus ??
+      0,
+    );
+
+  const slot =
+    options.slot ??
+    pick(
+      DUNGEON_SLOTS,
+    );
+
+  const weaponType =
+    slot ===
+      "weapon"
+      ? (
+          options.weaponType ??
+          pick(
+            Object.keys(
+              WEAPON_DATA,
+            ) as
+              DungeonWeaponType[],
+          )
+        )
+      : null;
+
+  const itemLevel =
+    Math.max(
+      1,
+      Math.floor(
+        options.itemLevel,
+      ),
+    );
+
+  const multiplier =
+    RARITY_DATA[
+      rarity
+    ].multiplier;
+
+  const budget =
+    Math.max(
+      2,
+      Math.round(
+        (
+          5 +
+          itemLevel *
+            1.7
+        ) *
+        multiplier,
+      ),
+    );
+
+  const stats = {
+    attack:
+      0,
+
+    defense:
+      0,
+
+    hp:
+      0,
+
+    critChance:
+      0,
+
+    critDamage:
+      0,
+
+    dodge:
+      0,
+  };
+
+  switch (
+    slot
+  ) {
+    case "weapon":
+      stats.attack =
+        budget;
+
+      stats.critChance =
+        Number(
+          (
+            0.01 *
+            multiplier
+          ).toFixed(
+            4,
+          ),
+        );
+
+      break;
+
+    case "helmet":
+      stats.defense =
+        Math.round(
+          budget *
+          0.7,
+        );
+
+      stats.hp =
+        budget *
+        3;
+
+      break;
+
+    case "armor":
+      stats.defense =
+        budget;
+
+      stats.hp =
+        budget *
+        5;
+
+      break;
+
+    case "gloves":
+      stats.attack =
+        Math.round(
+          budget *
+          0.55,
+        );
+
+      stats.critChance =
+        Number(
+          (
+            0.008 *
+            multiplier
+          ).toFixed(
+            4,
+          ),
+        );
+
+      break;
+
+    case "boots":
+      stats.defense =
+        Math.round(
+          budget *
+          0.45,
+        );
+
+      stats.dodge =
+        Number(
+          (
+            0.007 *
+            multiplier
+          ).toFixed(
+            4,
+          ),
+        );
+
+      break;
+
+    case "ring":
+      stats.attack =
+        Math.round(
+          budget *
+          0.45,
+        );
+
+      stats.critDamage =
+        Number(
+          (
+            0.018 *
+            multiplier
+          ).toFixed(
+            4,
+          ),
+        );
+
+      break;
+
+    case "necklace":
+      stats.hp =
+        budget *
+        6;
+
+      stats.defense =
+        Math.round(
+          budget *
+          0.3,
+        );
+
+      break;
+
+    case "artifact":
+      stats.attack =
+        Math.round(
+          budget *
+          0.4,
+        );
+
+      stats.defense =
+        Math.round(
+          budget *
+          0.4,
+        );
+
+      stats.hp =
+        budget *
+        2;
+
+      break;
+  }
+
+  return {
+    instanceId:
+      id("ITEM"),
+
+    discordId,
+
+    definitionId:
+      `${slot}-${rarity}`,
+
+    name:
+      itemName(
+        slot,
+        rarity,
+        weaponType,
+      ),
+
+    slot,
+
+    weaponType,
+
+    rarity,
+
+    itemLevel,
+
+    upgradeLevel:
+      0,
+
+    stats,
+
+    affixes:
+      createAffixes(
+        rarity,
+        itemLevel,
+      ),
+
+    equipped:
+      false,
+
+    tradeLocked:
+      false,
+
+    source:
+      options.source,
+
+    obtainedAt:
+      new Date(),
+  };
+}
+
+async function createItem(
+  discordId:
+    string,
+  options:
+    Parameters<
+      typeof generateItemData
+    >[1],
+) {
+  return DungeonItem.create(
+    generateItemData(
+      discordId,
+      options,
+    ),
+  );
+}
+
+async function effectiveStats(
+  profile: any,
+) {
+  const items =
+    await DungeonItem.find({
+      discordId:
+        profile.discordId,
+
+      equipped:
+        true,
+    });
+
+  let attack =
+    12 +
+    (
+      profile.level -
+      1
+    ) *
+      2.2;
+
+  let defense =
+    6 +
+    (
+      profile.level -
+      1
+    ) *
+      1.1;
+
+  let maxHp =
+    110 +
+    (
+      profile.level -
+      1
+    ) *
+      13;
+
+  let critChance =
+    0.05;
+
+  let critDamage =
+    1.5;
+
+  let dodge =
+    0.03;
+
+  let weaponType:
+    DungeonWeaponType =
+      "sword";
+
+  for (
+    const item of
+      items
+  ) {
+    const upgradeMulti =
+      1 +
+      (
+        item.upgradeLevel ??
+        0
+      ) *
+        0.08;
+
+    attack +=
+      (
+        item.stats
+          ?.attack ??
+        0
+      ) *
+      upgradeMulti;
+
+    defense +=
+      (
+        item.stats
+          ?.defense ??
+        0
+      ) *
+      upgradeMulti;
+
+    maxHp +=
+      (
+        item.stats
+          ?.hp ??
+        0
+      ) *
+      upgradeMulti;
+
+    critChance +=
+      item.stats
+        ?.critChance ??
+      0;
+
+    critDamage +=
+      item.stats
+        ?.critDamage ??
+      0;
+
+    dodge +=
+      item.stats
+        ?.dodge ??
+      0;
+
+    for (
+      const affix of
+        item.affixes ??
+        []
+    ) {
+      switch (
+        affix.key
+      ) {
+        case "attack":
+          attack +=
+            affix.value;
+
+          break;
+
+        case "defense":
+          defense +=
+            affix.value;
+
+          break;
+
+        case "hp":
+          maxHp +=
+            affix.value;
+
+          break;
+
+        case "critChance":
+          critChance +=
+            affix.value;
+
+          break;
+
+        case "critDamage":
+          critDamage +=
+            affix.value;
+
+          break;
+
+        case "dodge":
+          dodge +=
+            affix.value;
+
+          break;
+      }
+    }
+
+    if (
+      item.slot ===
+        "weapon" &&
+      item.weaponType
+    ) {
+      weaponType =
+        item.weaponType as
+          DungeonWeaponType;
+    }
+  }
+
+  const ascensionMulti =
+    1 +
+    (
+      profile.ascension ??
+      0
+    ) *
+      0.05;
+
+  attack *=
+    ascensionMulti;
+
+  defense *=
+    ascensionMulti;
+
+  maxHp *=
+    ascensionMulti;
+
+  switch (
+    weaponType
+  ) {
+    case "greatsword":
+      attack *=
+        1.22;
+
+      dodge -=
+        0.02;
+
+      break;
+
+    case "bow":
+      critChance +=
+        0.10;
+
+      break;
+
+    case "staff":
+      attack *=
+        1.12;
+
+      break;
+
+    case "dagger":
+      attack *=
+        0.94;
+
+      critChance +=
+        0.13;
+
+      dodge +=
+        0.07;
+
+      break;
+
+    case "shield":
+      attack *=
+        0.82;
+
+      defense *=
+        1.35;
+
+      maxHp *=
+        1.15;
+
+      break;
+  }
+
+  return {
+    attack:
+      Math.max(
+        1,
+        attack,
+      ),
+
+    defense:
+      Math.max(
+        0,
+        defense,
+      ),
+
+    maxHp:
+      Math.max(
+        1,
+        maxHp,
+      ),
+
+    critChance:
+      clamp(
+        critChance,
+        0,
+        0.75,
+      ),
+
+    critDamage:
+      Math.max(
+        1.25,
+        critDamage,
+      ),
+
+    dodge:
+      clamp(
+        dodge,
+        0,
+        0.45,
+      ),
+
+    weaponType,
+
+    items,
+  };
+}
+
+function simulateCombat(
+  player: {
+    attack:
+      number;
+
+    defense:
+      number;
+
+    critChance:
+      number;
+
+    critDamage:
+      number;
+
+    dodge:
+      number;
+
+    weaponType:
+      DungeonWeaponType;
+  },
+  currentHp:
+    number,
+  enemyPower:
+    number,
+  enemyLevel:
+    number,
+  kind:
+    "monster" |
+    "elite" |
+    "boss",
+) {
+  const typeMulti =
+    kind ===
+      "boss"
+      ? 3.8
+      : kind ===
+          "elite"
+        ? 2
+        : 1;
+
+  const enemyMaxHp =
+    Math.round(
+      (
+        45 +
+        enemyPower *
+          8 +
+        enemyLevel *
+          7
+      ) *
+      typeMulti,
+    );
+
+  const enemyAttack =
+    (
+      4 +
+      enemyPower *
+        1.25 +
+      enemyLevel *
+        0.35
+    ) *
+    (
+      kind ===
+        "boss"
+        ? 1.55
+        : kind ===
+            "elite"
+          ? 1.25
+          : 1
+    );
+
+  const enemyDefense =
+    enemyPower *
+      0.55 +
+    enemyLevel *
+      0.25;
+
+  let enemyHp =
+    enemyMaxHp;
+
+  let hp =
+    currentHp;
+
+  let turns =
+    0;
+
+  while (
+    hp > 0 &&
+    enemyHp > 0 &&
+    turns < 60
+  ) {
+    turns +=
+      1;
+
+    let damage =
+      player.attack *
+      (
+        0.88 +
+        Math.random() *
+          0.24
+      );
+
+    const critical =
+      Math.random() <
+      player.critChance;
+
+    if (
+      critical
+    ) {
+      damage *=
+        player.critDamage;
+    }
+
+    damage =
+      Math.max(
+        1,
+        Math.round(
+          damage *
+          (
+            100 /
+            (
+              100 +
+              enemyDefense
+            )
+          ),
+        ),
+      );
+
+    enemyHp -=
+      damage;
+
+    if (
+      player.weaponType ===
+        "sword" &&
+      Math.random() <
+        0.14
+    ) {
+      enemyHp -=
+        Math.max(
+          1,
+          Math.round(
+            damage *
+            0.22,
+          ),
+        );
+    }
+
+    if (
+      player.weaponType ===
+        "staff" &&
+      Math.random() <
+        0.18
+    ) {
+      enemyHp -=
+        Math.max(
+          1,
+          Math.round(
+            player.attack *
+            0.18,
+          ),
+        );
+    }
+
+    if (
+      enemyHp <=
+      0
+    ) {
+      break;
+    }
+
+    if (
+      Math.random() <
+      player.dodge
+    ) {
+      continue;
+    }
+
+    const received =
+      Math.max(
+        1,
+        Math.round(
+          enemyAttack *
+          (
+            100 /
+            (
+              100 +
+              player.defense
+            )
+          ) *
+          (
+            0.9 +
+            Math.random() *
+              0.2
+          ),
+        ),
+      );
+
+    hp -=
+      received;
+  }
+
+  return {
+    victory:
+      enemyHp <=
+      0,
+
+    hp:
+      Math.max(
+        0,
+        hp,
+      ),
+
+    turns,
+
+    enemyMaxHp,
+
+    enemyHp:
+      Math.max(
+        0,
+        enemyHp,
+      ),
+  };
+}
+
+async function addMaterial(
+  discordId:
+    string,
+  materialId:
+    string,
+  name:
+    string,
+  quantity:
+    number,
+) {
+  if (
+    quantity <=
+    0
+  ) {
+    return;
+  }
+
+  await DungeonMaterial
+    .findOneAndUpdate(
+      {
+        discordId,
+        materialId,
+      },
+      {
+        $setOnInsert: {
+          discordId,
+          materialId,
+          name,
+        },
+
+        $inc: {
+          quantity,
+        },
+      },
+      {
+        upsert:
+          true,
+
+        new:
+          true,
+
+        setDefaultsOnInsert:
+          true,
+      },
+    );
+}
+
+function highestUnlockedTier(
+  level:
+    number,
+): number {
+  let tier =
+    1;
+
+  for (
+    let i =
+      0;
+    i <
+      DUNGEONS.length;
+    i++
+  ) {
+    if (
+      level >=
+      DUNGEONS[i]!
+        .minLevel
+    ) {
+      tier =
+        i +
+        1;
+    }
+  }
+
+  return tier;
+}
+
+export const dungeonService = {
+  xpRequired,
+
+  async createCharacter(
+    discordId:
+      string,
+    weaponType:
+      DungeonWeaponType,
+  ) {
+    const existing =
+      await DungeonProfile
+        .findOne({
+          discordId,
+        });
+
+    if (
+      existing
+    ) {
+      throw new Error(
+        "คุณมีตัวละคร NEXORA Dungeons อยู่แล้ว",
+      );
+    }
+
+    const profile =
+      await DungeonProfile
+        .create({
+          discordId,
+
+          level:
+            1,
+
+          xp:
+            0,
+
+          ascension:
+            0,
+
+          ascensionPoints:
+            0,
+
+          highestDungeonTier:
+            1,
+        });
+
+    try {
+      const starter =
+        await createItem(
+          discordId,
+          {
+            itemLevel:
+              1,
+
+            rarity:
+              "common",
+
+            slot:
+              "weapon",
+
+            weaponType,
+
+            source:
+              "starter",
+          },
+        );
+
+      starter.tradeLocked =
+        true;
+
+      starter.equipped =
+        true;
+
+      await starter.save();
+
+      (
+        profile.equippedItems as
+          any
+      ).weapon =
+        starter.instanceId;
+
+      profile.markModified(
+        "equippedItems",
+      );
+
+      await profile.save();
+
+      await ensureEconomy(
+        discordId,
+      );
+
+      return {
+        profile,
+        starter,
+      };
+    } catch (
+      error
+    ) {
+      await DungeonProfile
+        .deleteOne({
+          _id:
+            profile._id,
+        })
+        .catch(
+          () =>
+            undefined,
+        );
+
+      throw error;
+    }
+  },
+
+  async getProfile(
+    discordId:
+      string,
+  ) {
+    const profile =
+      await DungeonProfile
+        .findOne({
+          discordId,
+        });
+
+    if (
+      !profile
+    ) {
+      return null;
+    }
+
+    const stats =
+      await effectiveStats(
+        profile,
+      );
+
+    const economy =
+      await ensureEconomy(
+        discordId,
+      );
+
+    return {
+      profile,
+      stats,
+      balance:
+        economy
+          ? new NexoNumber(
+              economy.balance,
+            )
+              .toSuffix()
+          : "0",
+    };
+  },
+
+  async getInventory(
+    discordId:
+      string,
+  ) {
+    const [
+      items,
+      materials,
+    ] =
+      await Promise.all([
+        DungeonItem
+          .find({
+            discordId,
+          })
+          .sort({
+            equipped:
+              -1,
+
+            itemLevel:
+              -1,
+
+            obtainedAt:
+              -1,
+          })
+          .limit(
+            100,
+          ),
+
+        DungeonMaterial
+          .find({
+            discordId,
+
+            quantity: {
+              $gt:
+                0,
+            },
+          })
+          .sort({
+            quantity:
+              -1,
+          }),
+      ]);
+
+    return {
+      items,
+      materials,
+    };
+  },
+
+  async equip(
+    discordId:
+      string,
+    instanceId:
+      string,
+  ) {
+    const profile =
+      await DungeonProfile
+        .findOne({
+          discordId,
+        });
+
+    if (
+      !profile
+    ) {
+      throw new Error(
+        "ยังไม่มีตัวละคร ใช้ /dungeon create ก่อน",
+      );
+    }
+
+    const item =
+      await DungeonItem
+        .findOne({
+          discordId,
+
+          instanceId,
+        });
+
+    if (
+      !item
+    ) {
+      throw new Error(
+        "ไม่พบ Item ID นี้ใน Inventory",
+      );
+    }
+
+    await DungeonItem
+      .updateMany(
+        {
+          discordId,
+
+          slot:
+            item.slot,
+
+          equipped:
+            true,
+        },
+        {
+          $set: {
+            equipped:
+              false,
+          },
+        },
+      );
+
+    item.equipped =
+      true;
+
+    await item.save();
+
+    (
+      profile.equippedItems as
+        any
+    )[
+      item.slot
+    ] =
+      item.instanceId;
+
+    profile.markModified(
+      "equippedItems",
+    );
+
+    await profile.save();
+
+    return item;
+  },
+
+  async upgradeItem(
+    discordId:
+      string,
+    instanceId:
+      string,
+  ) {
+    const item =
+      await DungeonItem
+        .findOne({
+          discordId,
+
+          instanceId,
+        });
+
+    if (
+      !item
+    ) {
+      throw new Error(
+        "ไม่พบ Item ID นี้",
+      );
+    }
+
+    if (
+      item.upgradeLevel >=
+      20
+    ) {
+      throw new Error(
+        "Item นี้อัปเกรดถึง +20 แล้ว",
+      );
+    }
+
+    const cost =
+      Math.floor(
+        300 *
+        Math.pow(
+          item.upgradeLevel +
+            1,
+          2,
+        ) *
+        (
+          1 +
+          item.itemLevel /
+            20
+        ),
+      );
+
+    await spendNexo(
+      discordId,
+      cost,
+      `Upgrade ${item.name} +${item.upgradeLevel + 1}`,
+      "dungeon_upgrade",
+      {
+        instanceId:
+          item.instanceId,
+
+        from:
+          item.upgradeLevel,
+
+        to:
+          item.upgradeLevel +
+          1,
+      },
+    );
+
+    item.upgradeLevel +=
+      1;
+
+    await item.save();
+
+    return {
+      item,
+      cost,
+    };
+  },
+
+  async forgeItem(
+    discordId:
+      string,
+    slot:
+      DungeonSlot,
+    materialId:
+      string,
+    weaponType:
+      DungeonWeaponType |
+      null,
+  ) {
+    const profile =
+      await DungeonProfile
+        .findOne({
+          discordId,
+        });
+
+    if (
+      !profile
+    ) {
+      throw new Error(
+        "ยังไม่มีตัวละคร ใช้ /dungeon create ก่อน",
+      );
+    }
+
+    if (
+      slot ===
+        "weapon" &&
+      !weaponType
+    ) {
+      throw new Error(
+        "การ Forge Weapon ต้องเลือกประเภทอาวุธ",
+      );
+    }
+
+    const materialInfo =
+      MATERIALS.find(
+        (material) =>
+          material.id ===
+          materialId,
+      );
+
+    if (
+      !materialInfo
+    ) {
+      throw new Error(
+        "ไม่รู้จัก Material นี้",
+      );
+    }
+
+    const materialCost =
+      12;
+
+    const nexoCost =
+      Math.floor(
+        500 +
+        profile.level *
+          75 +
+        profile.ascension *
+          500,
+      );
+
+    const economy =
+      await ensureEconomy(
+        discordId,
+      );
+
+    if (
+      !economy ||
+      new NexoNumber(
+        economy.balance,
+      ).lt(
+        nexoCost,
+      )
+    ) {
+      throw new Error(
+        `NEXO ไม่เพียงพอ ต้องใช้ ${nexoCost.toLocaleString()} NEXO`,
+      );
+    }
+
+    const material =
+      await DungeonMaterial
+        .findOneAndUpdate(
+          {
+            discordId,
+
+            materialId,
+
+            quantity: {
+              $gte:
+                materialCost,
+            },
+          },
+          {
+            $inc: {
+              quantity:
+                -materialCost,
+            },
+          },
+          {
+            new:
+              true,
+          },
+        );
+
+    if (
+      !material
+    ) {
+      throw new Error(
+        `ต้องใช้ ${materialCost} × ${materialInfo.name}`,
+      );
+    }
+
+    try {
+      await spendNexo(
+        discordId,
+        nexoCost,
+        `Forge ${SLOT_NAMES[slot]}`,
+        "dungeon_craft",
+        {
+          slot,
+          materialId,
+        },
+      );
+    } catch (
+      error
+    ) {
+      await addMaterial(
+        discordId,
+        materialId,
+        materialInfo.name,
+        materialCost,
+      );
+
+      throw error;
+    }
+
+    let rarity =
+      rollRarity(
+        0.45 +
+        profile.ascension *
+          0.05,
+      );
+
+    if (
+      rarity ===
+      "common"
+    ) {
+      rarity =
+        "uncommon";
+    }
+
+    const item =
+      await createItem(
+        discordId,
+        {
+          itemLevel:
+            profile.level,
+
+          rarity,
+
+          slot,
+
+          weaponType:
+            slot ===
+              "weapon"
+              ? weaponType
+              : null,
+
+          source:
+            "forge",
+        },
+      );
+
+    return {
+      item,
+      nexoCost,
+      materialCost,
+      materialName:
+        materialInfo.name,
+    };
+  },
+
+  async run(
+    discordId:
+      string,
+    dungeonId?:
+      string,
+    difficulty:
+      DungeonDifficulty =
+        "normal",
+  ) {
+    if (
+      activeRuns.has(
+        discordId,
+      )
+    ) {
+      throw new Error(
+        "คุณกำลังอยู่ใน Dungeon Run อื่น",
+      );
+    }
+
+    activeRuns.add(
+      discordId,
+    );
+
+    const startedAt =
+      new Date();
+
+    try {
+      const profile =
+        await DungeonProfile
+          .findOne({
+            discordId,
+          });
+
+      if (
+        !profile
+      ) {
+        throw new Error(
+          "ยังไม่มีตัวละคร ใช้ /dungeon create ก่อน",
+        );
+      }
+
+      let dungeon =
+        dungeonId
+          ? DUNGEON_MAP.get(
+              dungeonId,
+            )
+          : undefined;
+
+      if (
+        !dungeon
+      ) {
+        dungeon =
+          [
+            ...DUNGEONS,
+          ]
+            .reverse()
+            .find(
+              (candidate) =>
+                profile.level >=
+                candidate.minLevel,
+            );
+      }
+
+      if (
+        !dungeon
+      ) {
+        dungeon =
+          DUNGEONS[0]!;
+      }
+
+      const difficultyData =
+        DIFFICULTY_DATA[
+          difficulty
+        ];
+
+      const requiredLevel =
+        dungeon.minLevel +
+        difficultyData
+          .levelOffset;
+
+      if (
+        profile.level <
+        requiredLevel
+      ) {
+        throw new Error(
+          `${difficultyData.name} ${dungeon.name} ต้องการ Level ${requiredLevel}`,
+        );
+      }
+
+      const stats =
+        await effectiveStats(
+          profile,
+        );
+
+      let hp =
+        stats.maxHp;
+
+      let attackBonus =
+        1;
+
+      let xp =
+        0;
+
+      let nexo =
+        0;
+
+      let bossDefeated =
+        false;
+
+      const materialRewards =
+        new Map<
+          string,
+          {
+            name:
+              string;
+
+            quantity:
+              number;
+          }
+        >();
+
+      const droppedItems:
+        any[] = [];
+
+      const roomLog:
+        Array<
+          Record<
+            string,
+            unknown
+          >
+        > = [];
+
+      const roomTypes = [
+        "monster",
+        pick([
+          "event",
+          "treasure",
+          "monster",
+        ] as const),
+        "elite",
+        pick([
+          "event",
+          "treasure",
+          "monster",
+        ] as const),
+        "boss",
+      ] as const;
+
+      for (
+        let index =
+          0;
+        index <
+          roomTypes.length;
+        index++
+      ) {
+        const room =
+          roomTypes[
+            index
+          ]!;
+
+        if (
+          hp <=
+          0
+        ) {
+          break;
+        }
+
+        if (
+          room ===
+          "event"
+        ) {
+          const roll =
+            Math.random();
+
+          if (
+            roll <
+            0.34
+          ) {
+            const heal =
+              Math.round(
+                stats.maxHp *
+                0.28,
+              );
+
+            hp =
+              Math.min(
+                stats.maxHp,
+                hp +
+                  heal,
+              );
+
+            roomLog.push({
+              room:
+                index +
+                1,
+
+              type:
+                "event",
+
+              result:
+                `✨ Healing Shrine +${heal} HP`,
+            });
+          } else if (
+            roll <
+            0.67
+          ) {
+            const damage =
+              Math.max(
+                1,
+                Math.round(
+                  stats.maxHp *
+                  0.10,
+                ),
+              );
+
+            hp =
+              Math.max(
+                1,
+                hp -
+                  damage,
+              );
+
+            roomLog.push({
+              room:
+                index +
+                1,
+
+              type:
+                "event",
+
+              result:
+                `🪤 Trap -${damage} HP`,
+            });
+          } else {
+            attackBonus *=
+              1.10;
+
+            roomLog.push({
+              room:
+                index +
+                1,
+
+              type:
+                "event",
+
+              result:
+                "🔮 Shrine Blessing +10% ATK สำหรับ Run นี้",
+            });
+          }
+
+          continue;
+        }
+
+        if (
+          room ===
+          "treasure"
+        ) {
+          const treasureNexo =
+            Math.round(
+              dungeon.baseNexo *
+              difficultyData
+                .rewardMultiplier *
+              (
+                0.25 +
+                Math.random() *
+                  0.20
+              ),
+            );
+
+          nexo +=
+            treasureNexo;
+
+          const materialAmount =
+            randomInt(
+              1,
+              3,
+            );
+
+          const current =
+            materialRewards.get(
+              dungeon.materialId,
+            ) ?? {
+              name:
+                dungeon.materialName,
+
+              quantity:
+                0,
+            };
+
+          current.quantity +=
+            materialAmount;
+
+          materialRewards.set(
+            dungeon.materialId,
+            current,
+          );
+
+          let itemName:
+            string |
+            null =
+              null;
+
+          if (
+            Math.random() <
+            0.30 +
+              difficultyData
+                .rarityBonus *
+                0.05
+          ) {
+            const item =
+              await createItem(
+                discordId,
+                {
+                  itemLevel:
+                    Math.max(
+                      1,
+                      profile.level +
+                        randomInt(
+                          -2,
+                          2,
+                        ),
+                    ),
+
+                  rarityBonus:
+                    difficultyData
+                      .rarityBonus,
+
+                  source:
+                    `treasure:${dungeon.id}`,
+                },
+              );
+
+            droppedItems.push(
+              item,
+            );
+
+            itemName =
+              item.name;
+          }
+
+          roomLog.push({
+            room:
+              index +
+              1,
+
+            type:
+              "treasure",
+
+            result:
+              `📦 +${treasureNexo} NEXO, +${materialAmount} ${dungeon.materialName}` +
+              (
+                itemName
+                  ? `, ${itemName}`
+                  : ""
+              ),
+          });
+
+          continue;
+        }
+
+        const combatStats = {
+          ...stats,
+
+          attack:
+            stats.attack *
+            attackBonus,
+        };
+
+        const result =
+          simulateCombat(
+            combatStats,
+            hp,
+            dungeon.enemyPower *
+              difficultyData
+                .enemyMultiplier,
+            requiredLevel,
+            room,
+          );
+
+        hp =
+          result.hp;
+
+        if (
+          !result.victory
+        ) {
+          roomLog.push({
+            room:
+              index +
+              1,
+
+            type:
+              room,
+
+            result:
+              `💀 Defeated หลัง ${result.turns} turns`,
+          });
+
+          break;
+        }
+
+        const roomMultiplier =
+                    room ===
+            "boss"
+            ? 3
+            : room ===
+                "elite"
+              ? 1.7
+              : 1;
+
+        const gainedXp =
+          Math.round(
+            dungeon.baseXp *
+            difficultyData
+              .rewardMultiplier *
+            roomMultiplier *
+            (
+              room ===
+                "boss"
+                ? 0.85
+                : room ===
+                    "elite"
+                  ? 0.40
+                  : 0.18
+            ),
+          );
+
+        const gainedNexo =
+          Math.round(
+            dungeon.baseNexo *
+            difficultyData
+              .rewardMultiplier *
+            roomMultiplier *
+            (
+              room ===
+                "boss"
+                ? 0.75
+                : room ===
+                    "elite"
+                  ? 0.32
+                  : 0.15
+            ),
+          );
+
+        xp +=
+          gainedXp;
+
+        nexo +=
+          gainedNexo;
+
+        const materialAmount =
+          room ===
+            "boss"
+            ? randomInt(
+                3,
+                6,
+              )
+            : room ===
+                "elite"
+              ? randomInt(
+                  1,
+                  3,
+                )
+              : randomInt(
+                  0,
+                  2,
+                );
+
+        if (
+          materialAmount >
+          0
+        ) {
+          const current =
+            materialRewards.get(
+              dungeon.materialId,
+            ) ?? {
+              name:
+                dungeon.materialName,
+
+              quantity:
+                0,
+            };
+
+          current.quantity +=
+            materialAmount;
+
+          materialRewards.set(
+            dungeon.materialId,
+            current,
+          );
+        }
+
+        let droppedItemName:
+          string |
+          null =
+            null;
+
+        const dropChance =
+          (
+            room ===
+              "boss"
+              ? 0.70
+              : room ===
+                  "elite"
+                ? 0.28
+                : 0.08
+          ) +
+          difficultyData
+            .rarityBonus *
+            0.04;
+
+        if (
+          Math.random() <
+          dropChance
+        ) {
+          const item =
+            await createItem(
+              discordId,
+              {
+                itemLevel:
+                  Math.max(
+                    1,
+                    profile.level +
+                      (
+                        room ===
+                          "boss"
+                          ? randomInt(
+                              0,
+                              4,
+                            )
+                          : randomInt(
+                              -2,
+                              2,
+                            )
+                      ),
+                  ),
+
+                rarityBonus:
+                  difficultyData
+                    .rarityBonus +
+                  (
+                    room ===
+                      "boss"
+                      ? 0.9
+                      : room ===
+                          "elite"
+                        ? 0.35
+                        : 0
+                  ),
+
+                source:
+                  `${room}:${dungeon.id}`,
+              },
+            );
+
+          droppedItems.push(
+            item,
+          );
+
+          droppedItemName =
+            item.name;
+        }
+
+        if (
+          room ===
+          "boss"
+        ) {
+          bossDefeated =
+            true;
+        }
+
+        roomLog.push({
+          room:
+            index +
+            1,
+
+          type:
+            room,
+
+          result: [
+            room ===
+              "boss"
+              ? "👑 Boss defeated"
+              : room ===
+                  "elite"
+                ? "💀 Elite defeated"
+                : "⚔️ Monster defeated",
+
+            `+${gainedXp.toLocaleString()} EXP`,
+
+            `+${gainedNexo.toLocaleString()} NEXO`,
+
+            materialAmount >
+              0
+              ? `+${materialAmount} ${dungeon.materialName}`
+              : null,
+
+            droppedItemName,
+          ]
+            .filter(
+              Boolean,
+            )
+            .join(
+              " • ",
+            ),
+        });
+      }
+
+      const success =
+        bossDefeated &&
+        hp >
+          0;
+
+      if (
+        success
+      ) {
+        const completionXp =
+          Math.round(
+            dungeon.baseXp *
+            difficultyData
+              .rewardMultiplier *
+            0.75,
+          );
+
+        const completionNexo =
+          Math.round(
+            dungeon.baseNexo *
+            difficultyData
+              .rewardMultiplier *
+            0.65,
+          );
+
+        xp +=
+          completionXp;
+
+        nexo +=
+          completionNexo;
+
+        const current =
+          materialRewards.get(
+            dungeon.materialId,
+          ) ?? {
+            name:
+              dungeon.materialName,
+
+            quantity:
+              0,
+          };
+
+        current.quantity +=
+          randomInt(
+            2,
+            4,
+          );
+
+        materialRewards.set(
+          dungeon.materialId,
+          current,
+        );
+
+        roomLog.push({
+          room:
+            "completion",
+
+          type:
+            "completion",
+
+          result:
+            `🏆 Completion Bonus • +${completionXp.toLocaleString()} EXP • +${completionNexo.toLocaleString()} NEXO`,
+        });
+      } else {
+        /*
+         * Dungeon Failed:
+         * ยังได้ EXP / Materials บางส่วน
+         * แต่เสีย Boss / Completion Reward
+         */
+        xp =
+          Math.floor(
+            xp *
+            0.45,
+          );
+
+        nexo =
+          Math.floor(
+            nexo *
+            0.25,
+          );
+
+        for (
+          const reward of
+            materialRewards.values()
+        ) {
+          reward.quantity =
+            Math.floor(
+              reward.quantity *
+              0.5,
+            );
+        }
+      }
+
+      for (
+        const [
+          materialId,
+          reward,
+        ] of
+          materialRewards
+            .entries()
+      ) {
+        if (
+          reward.quantity <=
+          0
+        ) {
+          continue;
+        }
+
+        await addMaterial(
+          discordId,
+          materialId,
+          reward.name,
+          reward.quantity,
+        );
+      }
+
+      let balance:
+        string |
+        null =
+          null;
+
+      if (
+        nexo >
+        0
+      ) {
+        balance =
+          await awardNexo(
+            discordId,
+            nexo,
+            success
+              ? `Completed ${difficultyData.name} ${dungeon.name}`
+              : `Partial reward from ${difficultyData.name} ${dungeon.name}`,
+            {
+              dungeonId:
+                dungeon.id,
+
+              difficulty,
+
+              success,
+            },
+          );
+      }
+
+      const xpResult =
+        applyXp(
+          profile,
+          xp,
+        );
+
+      profile.totalRuns +=
+        1;
+
+      if (
+        success
+      ) {
+        profile.successfulRuns +=
+          1;
+
+        profile.bossesDefeated +=
+          1;
+      }
+
+      profile.highestDungeonTier =
+        Math.max(
+          profile.highestDungeonTier ??
+            1,
+
+          highestUnlockedTier(
+            profile.level,
+          ),
+        );
+
+      profile.lastRunAt =
+        new Date();
+
+      await profile.save();
+
+      const completedAt =
+        new Date();
+
+      const run =
+        await DungeonRun.create({
+          runId:
+            id("RUN"),
+
+          discordId,
+
+          dungeonId:
+            dungeon.id,
+
+          difficulty,
+
+          status:
+            success
+              ? "completed"
+              : "failed",
+
+          rooms:
+            roomLog,
+
+          rewards: {
+            xp,
+            nexo,
+
+            materials:
+              Array.from(
+                materialRewards.entries(),
+              ).map(
+                ([
+                  materialId,
+                  reward,
+                ]) => ({
+                  materialId,
+                  name:
+                    reward.name,
+                  quantity:
+                    reward.quantity,
+                }),
+              ),
+
+            items:
+              droppedItems.map(
+                (item) => ({
+                  instanceId:
+                    item.instanceId,
+
+                  name:
+                    item.name,
+
+                  rarity:
+                    item.rarity,
+
+                  slot:
+                    item.slot,
+                }),
+              ),
+
+            levelsGained:
+              xpResult.levelsGained,
+          },
+
+          startedAt,
+
+          completedAt,
+        });
+
+      return {
+        run,
+        profile,
+
+        dungeon,
+
+        difficulty,
+
+        difficultyData,
+
+        success,
+
+        hp:
+          Math.round(
+            hp,
+          ),
+
+        maxHp:
+          Math.round(
+            stats.maxHp,
+          ),
+
+        xp,
+
+        nexo,
+
+        balance,
+
+        levelsGained:
+          xpResult.levelsGained,
+
+        materials:
+          Array.from(
+            materialRewards.entries(),
+          ).map(
+            ([
+              materialId,
+              reward,
+            ]) => ({
+              materialId,
+
+              name:
+                reward.name,
+
+              quantity:
+                reward.quantity,
+            }),
+          ),
+
+        items:
+          droppedItems,
+
+        rooms:
+          roomLog,
+      };
+    } finally {
+      activeRuns.delete(
+        discordId,
+      );
+    }
+  },
+
+  async ascend(
+    discordId:
+      string,
+  ) {
+    const profile =
+      await DungeonProfile
+        .findOne({
+          discordId,
+        });
+
+    if (
+      !profile
+    ) {
+      throw new Error(
+        "ยังไม่มีตัวละคร ใช้ /dungeon create ก่อน",
+      );
+    }
+
+    if (
+      profile.level <
+      120
+    ) {
+      throw new Error(
+        `Ascension ต้องการ Level 120 ตอนนี้คุณ Level ${profile.level}`,
+      );
+    }
+
+    profile.ascension +=
+      1;
+
+    profile.ascensionPoints +=
+      1;
+
+    profile.level =
+      1;
+
+    profile.xp =
+      0;
+
+    profile.highestDungeonTier =
+      Math.max(
+        1,
+        profile.highestDungeonTier ??
+          1,
+      );
+
+    await profile.save();
+
+    return profile;
+  },
+
+  getDungeons() {
+    return [
+      ...DUNGEONS,
+    ];
+  },
+
+  getMaterials() {
+    return [
+      ...MATERIALS,
+    ];
+  },
+};
+EOF
+
+# ============================================================
+# 5. PATCH TRANSACTION TYPES
+# ============================================================
+
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path(
+    "src/models/Transaction.ts"
+)
+
+text = path.read_text(
+    encoding="utf-8",
+)
+
+if '"dungeon_reward"' not in text:
+    marker = '''          "miner_upgrade",
+'''
+
+    if marker not in text:
+        raise SystemExit(
+            "❌ หา miner_upgrade ใน Transaction.ts ไม่เจอ"
+        )
+
+    text = text.replace(
+        marker,
+        marker + '''          "dungeon_reward",
+          "dungeon_upgrade",
+          "dungeon_craft",
+''',
+        1,
+    )
+
+path.write_text(
+    text,
+    encoding="utf-8",
+)
+
+print(
+    "✅ Added Dungeon transaction types"
+)
+PY
+
+# ============================================================
+# 6. /DUNGEON COMMAND
+# ============================================================
+
+cat > src/commands/dungeon.ts <<'EOF'
+import {
+  EmbedBuilder,
+  SlashCommandBuilder,
+  type ChatInputCommandInteraction,
+} from "discord.js";
+
+import {
+  DUNGEONS,
+  DIFFICULTY_DATA,
+  MATERIALS,
+  RARITY_DATA,
+  SLOT_NAMES,
+  WEAPON_DATA,
+  type DungeonDifficulty,
+  type DungeonSlot,
+  type DungeonWeaponType,
+} from "../game/nexoDungeons/catalog.js";
+
+import {
+  dungeonService,
+} from "../services/dungeons/dungeonService.js";
+
+import {
+  communityLoggingService,
+} from "../services/logging/communityLoggingService.js";
+
+const COLOR =
+  0x5338e8;
+
+const rarityRank = [
+  "common",
+  "uncommon",
+  "rare",
+  "epic",
+  "legendary",
+  "mythic",
+  "ancient",
+  "divine",
+];
+
+function cut(
+  value: string,
+  max = 1024,
+): string {
+  if (
+    value.length <=
+    max
+  ) {
+    return value;
+  }
+
+  return (
+    value.slice(
+      0,
+      max - 1,
+    ) +
+    "…"
+  );
+}
+
+function errorMessage(
+  error: unknown,
+): string {
+  if (
+    error instanceof
+    Error
+  ) {
+    return error.message;
+  }
+
+  return String(
+    error,
+  );
+}
+
+const weaponChoices =
+  Object.entries(
+    WEAPON_DATA,
+  ).map(
+    ([
+      value,
+      weapon,
+    ]) => ({
+      name:
+        `${weapon.emoji} ${weapon.name}`,
+
+      value,
+    }),
+  );
+
+const dungeonChoices =
+  DUNGEONS.map(
+    (dungeon) => ({
+      name:
+        `${dungeon.emoji} ${dungeon.name}`,
+
+      value:
+        dungeon.id,
+    }),
+  );
+
+const materialChoices =
+  MATERIALS.map(
+    (material) => ({
+      name:
+        material.name,
+
+      value:
+        material.id,
+    }),
+  );
+
+export const data =
+  new SlashCommandBuilder()
+    .setName(
+      "dungeon",
+    )
+    .setDescription(
+      "⚔️ เล่น NEXORA Dungeons",
+    )
+
+    .addSubcommand(
+      (subcommand) =>
+        subcommand
+          .setName(
+            "create",
+          )
+          .setDescription(
+            "สร้างตัวละครและเลือกอาวุธเริ่มต้น",
+          )
+          .addStringOption(
+            (option) =>
+              option
+                .setName(
+                  "weapon",
+                )
+                .setDescription(
+                  "อาวุธเริ่มต้น",
+                )
+                .setRequired(
+                  true,
+                )
+                .addChoices(
+                  ...weaponChoices,
+                ),
+          ),
+    )
+
+    .addSubcommand(
+      (subcommand) =>
+        subcommand
+          .setName(
+            "profile",
+          )
+          .setDescription(
+            "ดูตัวละคร NEXORA Dungeons ของคุณ",
+          ),
+    )
+
+    .addSubcommand(
+      (subcommand) =>
+        subcommand
+          .setName(
+            "list",
+          )
+          .setDescription(
+            "ดู Dungeon ทั้งหมด",
+          ),
+    )
+
+    .addSubcommand(
+      (subcommand) =>
+        subcommand
+          .setName(
+            "run",
+          )
+          .setDescription(
+            "เข้าสู่ Dungeon",
+          )
+          .addStringOption(
+            (option) =>
+              option
+                .setName(
+                  "dungeon",
+                )
+                .setDescription(
+                  "Dungeon ที่ต้องการเข้า ถ้าไม่เลือกจะใช้ด่านสูงสุดที่เข้าได้",
+                )
+                .setRequired(
+                  false,
+                )
+                .addChoices(
+                  ...dungeonChoices,
+                ),
+          )
+          .addStringOption(
+            (option) =>
+              option
+                .setName(
+                  "difficulty",
+                )
+                .setDescription(
+                  "ระดับความยาก",
+                )
+                .setRequired(
+                  false,
+                )
+                .addChoices(
+                  {
+                    name:
+                      "⚔️ Normal",
+                    value:
+                      "normal",
+                  },
+
+                  {
+                    name:
+                      "🔥 Hard",
+                    value:
+                      "hard",
+                  },
+
+                  {
+                    name:
+                      "💀 Nightmare",
+                    value:
+                      "nightmare",
+                  },
+
+                  {
+                    name:
+                      "🌌 Abyss",
+                    value:
+                      "abyss",
+                  },
+                ),
+          ),
+    )
+
+    .addSubcommand(
+      (subcommand) =>
+        subcommand
+          .setName(
+            "inventory",
+          )
+          .setDescription(
+            "ดู Equipment และ Materials",
+          ),
+    )
+
+    .addSubcommand(
+      (subcommand) =>
+        subcommand
+          .setName(
+            "equip",
+          )
+          .setDescription(
+            "สวมใส่ Equipment",
+          )
+          .addStringOption(
+            (option) =>
+              option
+                .setName(
+                  "item",
+                )
+                .setDescription(
+                  "Item ID เช่น ITEM-XXXXXXXX",
+                )
+                .setRequired(
+                  true,
+                ),
+          ),
+    )
+
+    .addSubcommand(
+      (subcommand) =>
+        subcommand
+          .setName(
+            "upgrade",
+          )
+          .setDescription(
+            "อัปเกรด Equipment ด้วย NEXO",
+          )
+          .addStringOption(
+            (option) =>
+              option
+                .setName(
+                  "item",
+                )
+                .setDescription(
+                  "Item ID",
+                )
+                .setRequired(
+                  true,
+                ),
+          ),
+    )
+
+    .addSubcommand(
+      (subcommand) =>
+        subcommand
+          .setName(
+            "forge",
+          )
+          .setDescription(
+            "สร้าง Equipment จาก Materials + NEXO",
+          )
+          .addStringOption(
+            (option) =>
+              option
+                .setName(
+                  "slot",
+                )
+                .setDescription(
+                  "ประเภท Equipment",
+                )
+                .setRequired(
+                  true,
+                )
+                .addChoices(
+                  {
+                    name:
+                      "⚔️ Weapon",
+                    value:
+                      "weapon",
+                  },
+
+                  {
+                    name:
+                      "🪖 Helmet",
+                    value:
+                      "helmet",
+                  },
+
+                  {
+                    name:
+                      "🛡️ Armor",
+                    value:
+                      "armor",
+                  },
+
+                  {
+                    name:
+                      "🧤 Gloves",
+                    value:
+                      "gloves",
+                  },
+
+                  {
+                    name:
+                      "🥾 Boots",
+                    value:
+                      "boots",
+                  },
+
+                  {
+                    name:
+                      "💍 Ring",
+                    value:
+                      "ring",
+                  },
+
+                  {
+                    name:
+                      "📿 Necklace",
+                    value:
+                      "necklace",
+                  },
+
+                  {
+                    name:
+                      "🔮 Artifact",
+                    value:
+                      "artifact",
+                  },
+                ),
+          )
+          .addStringOption(
+            (option) =>
+              option
+                .setName(
+                  "material",
+                )
+                .setDescription(
+                  "Material หลักที่ใช้",
+                )
+                .setRequired(
+                  true,
+                )
+                .addChoices(
+                  ...materialChoices,
+                ),
+          )
+          .addStringOption(
+            (option) =>
+              option
+                .setName(
+                  "weapon",
+                )
+                .setDescription(
+                  "เลือกเฉพาะเมื่อ Forge Weapon",
+                )
+                .setRequired(
+                  false,
+                )
+                .addChoices(
+                  ...weaponChoices,
+                ),
+          ),
+    )
+
+    .addSubcommand(
+      (subcommand) =>
+        subcommand
+          .setName(
+            "ascend",
+          )
+          .setDescription(
+            "Ascend เมื่อถึง Level 120",
+          ),
+    );
+
+export async function execute(
+  interaction:
+    ChatInputCommandInteraction,
+): Promise<void> {
+  const discordId =
+    interaction.user.id;
+
+  const subcommand =
+    interaction.options
+      .getSubcommand();
+
+  try {
+    # noop
+  } catch {}
+}
+EOF
+
+# แก้ placeholder execute ด้วย Python เพื่อเลี่ยง shell quoting ยาวเกินไป
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path(
+    "src/commands/dungeon.ts"
+)
+
+text = path.read_text(
+    encoding="utf-8",
+)
+
+old = '''  try {
+    # noop
+  } catch {}
+}
+'''
+
+new = r'''  try {
+    if (
+      subcommand ===
+      "create"
+    ) {
+      const weaponType =
+        interaction.options
+          .getString(
+            "weapon",
+            true,
+          ) as
+            DungeonWeaponType;
+
+      const result =
+        await dungeonService
+          .createCharacter(
+            discordId,
+            weaponType,
+          );
+
+      const weapon =
+        WEAPON_DATA[
+          weaponType
+        ];
+
+      const embed =
+        new EmbedBuilder()
+          .setColor(
+            COLOR,
+          )
+          .setTitle(
+            "⚔️ NEXORA Dungeons",
+          )
+          .setDescription(
+            [
+              `สร้างตัวละครสำเร็จแล้ว **${interaction.user.displayName}**`,
+              "",
+              `${weapon.emoji} **Starter Weapon:** ${result.starter.name}`,
+              `> ${weapon.description}`,
+              "",
+              "ไม่มี Class ล็อกตัวละคร — เปลี่ยนอาวุธเมื่อไรก็เปลี่ยน Build ได้",
+            ].join(
+              "\n",
+            ),
+          )
+          .addFields(
+            {
+              name:
+                "Level",
+              value:
+                "1",
+              inline:
+                true,
+            },
+
+            {
+              name:
+                "Ascension",
+              value:
+                "0",
+              inline:
+                true,
+            },
+
+            {
+              name:
+                "เริ่มเล่น",
+              value:
+                "ใช้ `/dungeon run`",
+              inline:
+                true,
+            },
+          );
+
+      await interaction.reply({
+        embeds: [
+          embed,
+        ],
+      });
+
+      return;
+    }
+
+    if (
+      subcommand ===
+      "profile"
+    ) {
+      const data =
+        await dungeonService
+          .getProfile(
+            discordId,
+          );
+
+      if (!data) {
+        await interaction.reply({
+          content:
+            "❌ ยังไม่มีตัวละคร ใช้ `/dungeon create` ก่อน",
+
+          ephemeral:
+            true,
+        });
+
+        return;
+      }
+
+      const {
+        profile,
+        stats,
+        balance,
+      } =
+        data;
+
+      const required =
+        dungeonService
+          .xpRequired(
+            profile.level,
+          );
+
+      const weapon =
+        WEAPON_DATA[
+          stats.weaponType
+        ];
+
+      const embed =
+        new EmbedBuilder()
+          .setColor(
+            COLOR,
+          )
+          .setTitle(
+            `⚔️ ${interaction.user.displayName} • Dungeon Profile`,
+          )
+          .setDescription(
+            `${weapon.emoji} Build ปัจจุบัน: **${weapon.name}**`,
+          )
+          .addFields(
+            {
+              name:
+                "Progression",
+              value: [
+                `**Level:** ${profile.level}/120`,
+                `**EXP:** ${profile.level >= 120 ? "MAX" : `${profile.xp.toLocaleString()} / ${required.toLocaleString()}`}`,
+                `**Ascension:** ${profile.ascension}`,
+                `**Ascension Points:** ${profile.ascensionPoints}`,
+              ].join(
+                "\n",
+              ),
+              inline:
+                true,
+            },
+
+            {
+              name:
+                "Combat",
+              value: [
+                `❤️ HP: **${Math.round(stats.maxHp).toLocaleString()}**`,
+                `⚔️ ATK: **${Math.round(stats.attack).toLocaleString()}**`,
+                `🛡️ DEF: **${Math.round(stats.defense).toLocaleString()}**`,
+                `💥 CRIT: **${(stats.critChance * 100).toFixed(1)}%**`,
+                `💨 Dodge: **${(stats.dodge * 100).toFixed(1)}%**`,
+              ].join(
+                "\n",
+              ),
+              inline:
+                true,
+            },
+
+            {
+              name:
+                "Economy",
+              value:
+                `💠 **${balance} NEXO**`,
+              inline:
+                true,
+            },
+
+            {
+              name:
+                "Dungeon Record",
+              value: [
+                `Runs: **${profile.totalRuns.toLocaleString()}**`,
+                `Clears: **${profile.successfulRuns.toLocaleString()}**`,
+                `Bosses: **${profile.bossesDefeated.toLocaleString()}**`,
+              ].join(
+                "\n",
+              ),
+              inline:
+                false,
+            },
+          );
+
+      await interaction.reply({
+        embeds: [
+          embed,
+        ],
+      });
+
+      return;
+    }
+
+    if (
+      subcommand ===
+      "list"
+    ) {
+      const lines =
+        DUNGEONS.map(
+          (
+            dungeon,
+            index,
+          ) =>
+            [
+              `${index + 1}. ${dungeon.emoji} **${dungeon.name}**`,
+              `Lv.${dungeon.minLevel}+ • ${dungeon.materialName}`,
+            ].join(
+              " — ",
+            ),
+        );
+
+      const difficulty =
+        Object.entries(
+          DIFFICULTY_DATA,
+        ).map(
+          ([
+            key,
+            value,
+          ]) =>
+            `**${value.name}:** +${value.levelOffset} Lv • ×${value.rewardMultiplier} Reward`,
+        );
+
+      const embed =
+        new EmbedBuilder()
+          .setColor(
+            COLOR,
+          )
+          .setTitle(
+            "🗺️ NEXORA Dungeons",
+          )
+          .setDescription(
+            lines.join(
+              "\n",
+            ),
+          )
+          .addFields({
+            name:
+              "Difficulty",
+            value:
+              difficulty.join(
+                "\n",
+              ),
+          });
+
+      await interaction.reply({
+        embeds: [
+          embed,
+        ],
+      });
+
+      return;
+    }
+
+    if (
+      subcommand ===
+      "run"
+    ) {
+      const dungeonId =
+        interaction.options
+          .getString(
+            "dungeon",
+          ) ??
+        undefined;
+
+      const difficulty =
+        (
+          interaction.options
+            .getString(
+              "difficulty",
+            ) ??
+          "normal"
+        ) as
+          DungeonDifficulty;
+
+      await interaction.deferReply();
+
+      const result =
+        await dungeonService
+          .run(
+            discordId,
+            dungeonId,
+            difficulty,
+          );
+
+      const roomText =
+        result.rooms
+          .map(
+            (
+              room,
+              index,
+            ) =>
+              `**${index + 1}.** ${String(room.result ?? room.type)}`,
+          )
+          .join(
+            "\n",
+          );
+
+      const itemText =
+        result.items.length >
+        0
+          ? result.items
+              .map(
+                (item) => {
+                  const rarity =
+                    RARITY_DATA[
+                      item.rarity as
+                        keyof typeof RARITY_DATA
+                    ];
+
+                  return (
+                    `${rarity.emoji} **${item.name}** ` +
+                    `• Lv.${item.itemLevel} • \`${item.instanceId}\``
+                  );
+                },
+              )
+              .join(
+                "\n",
+              )
+          : "ไม่มี";
+
+      const materialText =
+        result.materials
+          .filter(
+            (material) =>
+              material.quantity >
+              0,
+          )
+          .map(
+            (material) =>
+              `• ${material.name} × **${material.quantity}**`,
+          )
+          .join(
+            "\n",
+          ) ||
+        "ไม่มี";
+
+      const embed =
+        new EmbedBuilder()
+          .setColor(
+            result.success
+              ? 0x00d9ff
+              : 0xb23cff,
+          )
+          .setTitle(
+            result.success
+              ? `🏆 CLEARED • ${result.dungeon.name}`
+              : `💀 FAILED • ${result.dungeon.name}`,
+          )
+          .setDescription(
+            cut(
+              roomText,
+              4000,
+            ),
+          )
+          .addFields(
+            {
+              name:
+                "Difficulty",
+              value:
+                result.difficultyData.name,
+              inline:
+                true,
+            },
+
+            {
+              name:
+                "HP",
+              value:
+                `${result.hp.toLocaleString()} / ${result.maxHp.toLocaleString()}`,
+              inline:
+                true,
+            },
+
+            {
+              name:
+                "Level",
+              value:
+                `${result.profile.level}${result.levelsGained > 0 ? ` ⬆️ +${result.levelsGained}` : ""}`,
+              inline:
+                true,
+            },
+
+            {
+              name:
+                "Rewards",
+              value: [
+                `✨ **${result.xp.toLocaleString()} EXP**`,
+                `💠 **${result.nexo.toLocaleString()} NEXO**`,
+              ].join(
+                "\n",
+              ),
+              inline:
+                true,
+            },
+
+            {
+              name:
+                "Materials",
+              value:
+                cut(
+                  materialText,
+                ),
+              inline:
+                true,
+            },
+
+            {
+              name:
+                "Equipment Drops",
+              value:
+                cut(
+                  itemText,
+                ),
+              inline:
+                false,
+            },
+          )
+          .setFooter({
+            text:
+              `Run ${result.run.runId}`,
+          });
+
+      await interaction.editReply({
+        embeds: [
+          embed,
+        ],
+      });
+
+      if (
+        interaction.guild
+      ) {
+        for (
+          const item of
+            result.items
+        ) {
+          const rank =
+            rarityRank.indexOf(
+              String(
+                item.rarity,
+              ),
+            );
+
+          if (
+            rank <
+            rarityRank.indexOf(
+              "legendary",
+            )
+          ) {
+            continue;
+          }
+
+          await communityLoggingService
+            .rpg(
+              interaction.guild,
+              {
+                event:
+                  "rare_drop",
+
+                title:
+                  "Rare Equipment Drop",
+
+                severity:
+                  "success",
+
+                userId:
+                  discordId,
+
+                fields: [
+                  {
+                    name:
+                      "Item",
+                    value:
+                      `${RARITY_DATA[item.rarity as keyof typeof RARITY_DATA].emoji} **${item.name}**`,
+                    inline:
+                      false,
+                  },
+
+                  {
+                    name:
+                      "Rarity",
+                    value:
+                      String(
+                        item.rarity,
+                      ),
+                    inline:
+                      true,
+                  },
+
+                  {
+                    name:
+                      "Dungeon",
+                    value:
+                      result.dungeon.name,
+                    inline:
+                      true,
+                  },
+                ],
+
+                metadata: {
+                  instanceId:
+                    item.instanceId,
+
+                  rarity:
+                    item.rarity,
+
+                  dungeonId:
+                    result.dungeon.id,
+                },
+              },
+            )
+            .catch(
+              () =>
+                undefined,
+            );
+        }
+      }
+
+      return;
+    }
+
+    if (
+      subcommand ===
+      "inventory"
+    ) {
+      const inventory =
+        await dungeonService
+          .getInventory(
+            discordId,
+          );
+
+      const itemLines =
+        inventory.items
+          .slice(
+            0,
+            20,
+          )
+          .map(
+            (item) => {
+              const rarity =
+                RARITY_DATA[
+                  item.rarity as
+                    keyof typeof RARITY_DATA
+                ];
+
+              return [
+                item.equipped
+                  ? "✅"
+                  : "▫️",
+
+                rarity.emoji,
+
+                `**${item.name}**`,
+
+                `Lv.${item.itemLevel}`,
+
+                `+${item.upgradeLevel}`,
+
+                `\`${item.instanceId}\``,
+              ].join(
+                " ",
+              );
+            },
+          );
+
+      const materialLines =
+        inventory.materials
+          .map(
+            (material) =>
+              `• **${material.name}** × ${material.quantity.toLocaleString()}`,
+          );
+
+      const embed =
+        new EmbedBuilder()
+          .setColor(
+            COLOR,
+          )
+          .setTitle(
+            "🎒 Dungeon Inventory",
+          )
+          .addFields(
+            {
+              name:
+                `Equipment (${inventory.items.length})`,
+              value:
+                cut(
+                  itemLines.join(
+                    "\n",
+                  ) ||
+                  "ยังไม่มี Equipment",
+                ),
+              inline:
+                false,
+            },
+
+            {
+              name:
+                "Materials",
+              value:
+                cut(
+                  materialLines.join(
+                    "\n",
+                  ) ||
+                  "ยังไม่มี Materials",
+                ),
+              inline:
+                false,
+            },
+          )
+          .setFooter({
+            text:
+              "✅ = Equipped • ใช้ Item ID กับ /dungeon equip หรือ /dungeon upgrade",
+          });
+
+      await interaction.reply({
+        embeds: [
+          embed,
+        ],
+
+        ephemeral:
+          true,
+      });
+
+      return;
+    }
+
+    if (
+      subcommand ===
+      "equip"
+    ) {
+      const itemId =
+        interaction.options
+          .getString(
+            "item",
+            true,
+          )
+          .trim();
+
+      const item =
+        await dungeonService
+          .equip(
+            discordId,
+            itemId,
+          );
+
+      await interaction.reply({
+        content:
+          `✅ สวมใส่ **${item.name}** แล้ว`,
+
+        ephemeral:
+          true,
+      });
+
+      return;
+    }
+
+    if (
+      subcommand ===
+      "upgrade"
+    ) {
+      const itemId =
+        interaction.options
+          .getString(
+            "item",
+            true,
+          )
+          .trim();
+
+      const result =
+        await dungeonService
+          .upgradeItem(
+            discordId,
+            itemId,
+          );
+
+      await interaction.reply({
+        content:
+          `🔨 อัปเกรด **${result.item.name}** เป็น **+${result.item.upgradeLevel}** สำเร็จ ใช้ ${result.cost.toLocaleString()} NEXO`,
+
+        ephemeral:
+          true,
+      });
+
+      return;
+    }
+
+    if (
+      subcommand ===
+      "forge"
+    ) {
+      const slot =
+        interaction.options
+          .getString(
+            "slot",
+            true,
+          ) as
+            DungeonSlot;
+
+      const materialId =
+        interaction.options
+          .getString(
+            "material",
+            true,
+          );
+
+      const weaponOption =
+        interaction.options
+          .getString(
+            "weapon",
+          ) as
+            DungeonWeaponType |
+            null;
+
+      if (
+        slot ===
+          "weapon" &&
+        !weaponOption
+      ) {
+        await interaction.reply({
+          content:
+            "❌ Forge Weapon ต้องเลือก `weapon` ด้วย",
+
+          ephemeral:
+            true,
+        });
+
+        return;
+      }
+
+      const result =
+        await dungeonService
+          .forgeItem(
+            discordId,
+            slot,
+            materialId,
+            weaponOption,
+          );
+
+      const rarity =
+        RARITY_DATA[
+          result.item.rarity as
+            keyof typeof RARITY_DATA
+        ];
+
+      const affixes =
+        (
+          result.item.affixes ??
+          []
+        )
+          .map(
+            (affix) =>
+              `• ${affix.label}: +${affix.value}`,
+          )
+          .join(
+            "\n",
+          );
+
+      const embed =
+        new EmbedBuilder()
+          .setColor(
+            COLOR,
+          )
+          .setTitle(
+            "🔥 Forge Complete",
+          )
+          .setDescription(
+            `${rarity.emoji} **${result.item.name}**`,
+          )
+          .addFields(
+            {
+              name:
+                "Slot",
+              value:
+                SLOT_NAMES[
+                  result.item.slot as
+                    keyof typeof SLOT_NAMES
+                ],
+              inline:
+                true,
+            },
+
+            {
+              name:
+                "Item Level",
+              value:
+                String(
+                  result.item.itemLevel,
+                ),
+              inline:
+                true,
+            },
+
+            {
+              name:
+                "Item ID",
+              value:
+                `\`${result.item.instanceId}\``,
+              inline:
+                false,
+            },
+
+            {
+              name:
+                "Cost",
+              value:
+                `${result.nexoCost.toLocaleString()} NEXO\n${result.materialCost} × ${result.materialName}`,
+              inline:
+                false,
+            },
+
+            ...(affixes
+              ? [
+                  {
+                    name:
+                      "Affixes",
+                    value:
+                      affixes,
+                    inline:
+                      false,
+                  },
+                ]
+              : []),
+          );
+
+      await interaction.reply({
+        embeds: [
+          embed,
+        ],
+      });
+
+      return;
+    }
+
+    if (
+      subcommand ===
+      "ascend"
+    ) {
+      const profile =
+        await dungeonService
+          .ascend(
+            discordId,
+          );
+
+      const embed =
+        new EmbedBuilder()
+          .setColor(
+            0x00d9ff,
+          )
+          .setTitle(
+            "✨ ASCENSION",
+          )
+          .setDescription(
+            [
+              `**${interaction.user.displayName}** Ascend สำเร็จ`,
+              "",
+              `Ascension **${profile.ascension}**`,
+              `Ascension Points **${profile.ascensionPoints}**`,
+              "",
+              "Level ถูกรีเซ็ตเป็น **1**",
+              "Equipment ทั้งหมดยังคงอยู่",
+              "ได้รับโบนัส Permanent Stats จาก Ascension",
+            ].join(
+              "\n",
+            ),
+          );
+
+      await interaction.reply({
+        embeds: [
+          embed,
+        ],
+      });
+
+      if (
+        interaction.guild
+      ) {
+        await communityLoggingService
+          .rpg(
+            interaction.guild,
+            {
+              event:
+                "ascension",
+
+              title:
+                "Player Ascended",
+
+              severity:
+                "success",
+
+              userId:
+                discordId,
+
+              fields: [
+                {
+                  name:
+                    "Ascension",
+                  value:
+                    String(
+                      profile.ascension,
+                    ),
+                  inline:
+                    true,
+                },
+
+                {
+                  name:
+                    "Points",
+                  value:
+                    String(
+                      profile.ascensionPoints,
+                    ),
+                  inline:
+                    true,
+                },
+              ],
+            },
+          )
+          .catch(
+            () =>
+              undefined,
+          );
+      }
+
+      return;
+    }
+
+    await interaction.reply({
+      content:
+        "❌ Unknown Dungeon subcommand",
+
+      ephemeral:
+        true,
+    });
+  } catch (error) {
+    const message =
+      errorMessage(
+        error,
+      );
+
+    if (
+      interaction.deferred ||
+      interaction.replied
+    ) {
+      await interaction.editReply({
+        content:
+          `❌ ${message}`,
+
+        embeds:
+          [],
+      });
+
+      return;
+    }
+
+    await interaction.reply({
+      content:
+        `❌ ${message}`,
+
+      ephemeral:
+        true,
+    });
+  }
+}
+'''
+
+if old not in text:
+    raise SystemExit(
+        "❌ Dungeon command placeholder not found"
+    )
+
+path.write_text(
+    text.replace(
+        old,
+        new,
+        1,
+    ),
+    encoding="utf-8",
+)
+
+print(
+    "✅ Created /dungeon command"
+)
+PY
+
+# ============================================================
+# 7. REMOVE MINER RUNTIME FROM index.ts
+#    เก็บ Models/ข้อมูลไว้ แต่ Miner จะไม่ทำงานอีกแล้ว
+# ============================================================
+
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+path = Path(
+    "src/index.ts"
+)
+
+text = path.read_text(
+    encoding="utf-8",
+)
+
+patterns = [
+    r'''
+import \{
+  setMinerDiscordClient,
+\} from "\./services/nexo/minerRareDropNotificationService\.js";
+
+''',
+
+    r'''
+import \{
+  minerSettlementWorker,
+\} from "\./services/nexo/minerSettlementWorker\.js";
+
+''',
+
+    r'''
+  setMinerDiscordClient\(
+    client,
+  \);
+
+''',
+
+    r'''
+  minerSettlementWorker\.start\(\);
+''',
+
+    r'''
+      minerSettlementWorker\.stop\(\);
+''',
+]
+
+for pattern in patterns:
+    text = re.sub(
+        pattern,
+        "",
+        text,
+        count=1,
+        flags=re.VERBOSE,
+    )
+
+# regex แบบ flexible สำหรับ formatting ที่อาจต่างจาก main
+text = re.sub(
+    r'import\s*\{\s*setMinerDiscordClient,\s*\}\s*from\s*"\./services/nexo/minerRareDropNotificationService\.js";\s*',
+    "",
+    text,
+)
+
+text = re.sub(
+    r'import\s*\{\s*minerSettlementWorker,\s*\}\s*from\s*"\./services/nexo/minerSettlementWorker\.js";\s*',
+    "",
+    text,
+)
+
+text = re.sub(
+    r'\s*setMinerDiscordClient\(\s*client,\s*\);\s*',
+    "\n",
+    text,
+)
+
+text = re.sub(
+    r'\s*minerSettlementWorker\.start\(\);\s*',
+    "\n",
+    text,
+)
+
+text = re.sub(
+    r'\s*minerSettlementWorker\.stop\(\);\s*',
+    "\n",
+    text,
+)
+
+path.write_text(
+    text,
+    encoding="utf-8",
+)
+
+print(
+    "✅ Disabled NEXO Miner runtime"
+)
+PY
+
+# ============================================================
+# 8. UPDATE CHATBOT KNOWLEDGE
+# ============================================================
+
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path(
+    "src/services/chatbot/nexoraKnowledge.ts"
+)
+
+if not path.exists():
+    print(
+        "⚠️ Chatbot knowledge file not found — skipping"
+    )
+    raise SystemExit(0)
+
+text = path.read_text(
+    encoding="utf-8",
+)
+
+text = text.replace(
+    "Economy Game ของ NEXORA กำลังเปลี่ยนจาก Miner ไปเป็น Dungeon/RPG",
+    "Economy Game ของ NEXORA คือ NEXORA Dungeons เกมแนว Dungeon/RPG",
+)
+
+text = text.replace(
+    "- มี Dungeon, Monster, Elite, Event, Treasure, Boss,\nCrafting, Rare Drops, Party Dungeon, Raid และ World Boss",
+    "- มี Dungeon, Monster, Elite, Event, Treasure, Boss,\nCrafting, Equipment Drops, Materials, Rare Drops และ Ascension\n- Party Dungeon, Raid และ World Boss เป็นระบบ Multiplayer ที่จะเพิ่มต่อจาก Solo Core",
+)
+
+path.write_text(
+    text,
+    encoding="utf-8",
+)
+
+print(
+    "✅ Updated NEXORA AI knowledge → Dungeons"
+)
+PY
+
+# ============================================================
+# 9. MAKE SURE OLD MINER COMMANDS ARE NOT ACTIVE
+# ============================================================
+
+python3 - <<'PY'
+from pathlib import Path
+import shutil
+
+targets = [
+    Path(
+        "src/commands/economy/miner.ts"
+    ),
+    Path(
+        "src/commands/economy/miner-item.ts"
+    ),
+    Path(
+        "src/commands/economy/miner-shop.ts"
+    ),
+    Path(
+        "src/commands/economy/pickaxe.ts"
+    ),
+]
+
+archive_root = Path(
+    "legacy/nexo-miner/commands"
+)
+
+archive_root.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+for path in targets:
+    if not path.exists():
+        continue
+
+    destination = (
+        archive_root /
+        path.name
+    )
+
+    if (
+        destination.exists()
+    ):
+        destination.unlink()
+
+    shutil.move(
+        str(path),
+        str(destination),
+    )
+
+    print(
+        f"📦 Archived {path}"
+    )
+PY
+
+# ============================================================
+# 10. SANITY CHECKS
+# ============================================================
+
+echo
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🔎 Checking migration..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+if grep -RIn \
+  'minerSettlementWorker.start' \
+  src/index.ts
+then
+  echo "❌ Miner worker ยังถูก start อยู่"
+  exit 1
+else
+  echo "✅ Miner settlement worker disabled"
+fi
+
+if grep -RIn \
+  'setMinerDiscordClient' \
+  src/index.ts
+then
+  echo "❌ Miner Discord runtime ยัง active อยู่"
+  exit 1
+else
+  echo "✅ Miner notification runtime disabled"
+fi
+
+test -f \
+  src/commands/dungeon.ts
+
+test -f \
+  src/services/dungeons/dungeonService.ts
+
+test -f \
+  src/models/DungeonProfile.ts
+
+test -f \
+  src/models/DungeonItem.ts
+
+test -f \
+  src/models/DungeonMaterial.ts
+
+test -f \
+  src/models/DungeonRun.ts
+
+echo "✅ Dungeon Core files present"
+
+# ============================================================
+# 11. BUILD
+# ============================================================
+
+echo
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🔨 Building NEXORA Dungeons..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+npm run build
+
+# ============================================================
+# 12. DEPLOY SLASH COMMANDS
+# ============================================================
+
+echo
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🚀 Deploying /dungeon..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+node dist/deploy-commands.js
+
+# ============================================================
+# 13. COMMIT + PUSH
+# ============================================================
+
+echo
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📦 Saving migration..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+git add -A
+
+if git diff --cached --quiet; then
+  echo "✓ No new changes to commit"
+else
+  git commit \
+    -m "feat: replace NEXO Miner with NEXORA Dungeons"
+
+  git push origin main
+fi
+
+echo
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "⚔️ NEXORA DUNGEONS READY"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo
+echo "Miner gameplay:"
+echo "  ❌ Miner commands archived"
+echo "  ❌ Mining settlement worker disabled"
+echo "  ❌ Rare ore runtime disabled"
+echo
+echo "Preserved:"
+echo "  ✅ Existing NEXO wallet"
+echo "  ✅ Bank"
+echo "  ✅ Economy history"
+echo "  ✅ Old Miner DB data (not deleted)"
+echo
+echo "Dungeons:"
+echo "  ✅ Character creation"
+echo "  ✅ Weapon-based builds"
+echo "  ✅ 8 Dungeons"
+echo "  ✅ Normal / Hard / Nightmare / Abyss"
+echo "  ✅ Monster / Event / Treasure / Elite / Boss"
+echo "  ✅ Equipment"
+echo "  ✅ 8 rarities"
+echo "  ✅ Random affixes"
+echo "  ✅ Materials"
+echo "  ✅ Forge"
+echo "  ✅ Equipment upgrade"
+echo "  ✅ Auto combat simulation"
+echo "  ✅ Failed-run partial rewards"
+echo "  ✅ Level 1–120"
+echo "  ✅ Ascension"
+echo "  ✅ RPG Logging"
+echo
+echo "Commands:"
+echo "  /dungeon create"
+echo "  /dungeon profile"
+echo "  /dungeon list"
+echo "  /dungeon run"
+echo "  /dungeon inventory"
+echo "  /dungeon equip"
+echo "  /dungeon upgrade"
+echo "  /dungeon forge"
+echo "  /dungeon ascend"
+echo
+echo "Start:"
+echo "  npm start"
+BASH
