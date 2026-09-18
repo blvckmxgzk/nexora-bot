@@ -8,7 +8,8 @@ type AnyFunction =
     Promise<any>;
 
 function toEditOptions(
-  options: any,
+  options:
+    any,
 ): any {
   if (
     typeof options ===
@@ -25,9 +26,8 @@ function toEditOptions(
   };
 
   /*
-   * editReply cannot change ephemeral state.
-   * If the guard auto-deferred, the message
-   * is already ephemeral.
+   * editReply cannot change the ephemeral
+   * state established by deferReply().
    */
   delete clean.ephemeral;
   delete clean.flags;
@@ -37,8 +37,12 @@ function toEditOptions(
   return clean;
 }
 
-export function isUnknownInteractionError(
-  error: unknown,
+function hasDiscordErrorCode(
+  error:
+    unknown,
+
+  code:
+    number,
 ): boolean {
   if (
     !error ||
@@ -64,30 +68,101 @@ export function isUnknownInteractionError(
 
   return (
     candidate.code ===
-      10062 ||
+      code ||
     candidate.rawError
       ?.code ===
-      10062 ||
-    String(
-      candidate.message ??
-      "",
-    ).includes(
-      "Unknown interaction",
+      code
+  );
+}
+
+export function isUnknownInteractionError(
+  error:
+    unknown,
+): boolean {
+  if (
+    hasDiscordErrorCode(
+      error,
+      10062,
     )
+  ) {
+    return true;
+  }
+
+  if (
+    !error ||
+    typeof error !==
+      "object"
+  ) {
+    return false;
+  }
+
+  const candidate =
+    error as {
+      message?:
+        unknown;
+    };
+
+  return String(
+    candidate.message ??
+    "",
+  ).includes(
+    "Unknown interaction",
+  );
+}
+
+export function isAlreadyAcknowledgedError(
+  error:
+    unknown,
+): boolean {
+  if (
+    hasDiscordErrorCode(
+      error,
+      40060,
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    !error ||
+    typeof error !==
+      "object"
+  ) {
+    return false;
+  }
+
+  const candidate =
+    error as {
+      message?:
+        unknown;
+    };
+
+  return String(
+    candidate.message ??
+    "",
+  ).includes(
+    "Interaction has already been acknowledged",
   );
 }
 
 /*
- * Discord requires the initial interaction
+ * Discord requires the first interaction
  * acknowledgement within roughly 3 seconds.
  *
- * Existing NEXORA commands can perform MongoDB,
- * AutoMod or other async work before reply().
+ * The important part here is SINGLE-FLIGHT:
  *
- * This guard waits 1.8s. If the command has not
- * replied/deferred by then, NEXORA automatically
- * defers ephemerally and transparently converts
- * a later reply() into editReply().
+ * reply()
+ * deferReply()
+ * automatic deferReply()
+ *
+ * are never allowed to send two initial
+ * acknowledgements concurrently.
+ *
+ * discord.js only flips interaction.replied /
+ * interaction.deferred after the REST request
+ * completes. Without this lock, a slow reply()
+ * can still look "unacknowledged" when the
+ * 1.8 second timer fires, causing Discord 40060.
  */
 export function installInteractionDeadlineGuard(
   interaction:
@@ -124,7 +199,15 @@ export function installInteractionDeadlineGuard(
       ) as
         AnyFunction;
 
-  let automaticAck:
+  /*
+   * Represents ANY initial acknowledgement
+   * currently travelling to Discord.
+   *
+   * This is deliberately separate from
+   * interaction.replied/deferred because those
+   * flags update only after Discord responds.
+   */
+  let initialAckInFlight:
     Promise<any> |
     null =
       null;
@@ -132,22 +215,90 @@ export function installInteractionDeadlineGuard(
   let disposed =
     false;
 
+  const runInitialAck =
+    async (
+      operation:
+        () =>
+          Promise<any>,
+    ): Promise<any> => {
+      if (
+        initialAckInFlight
+      ) {
+        return initialAckInFlight;
+      }
+
+      let promise:
+        Promise<any>;
+
+      try {
+        promise =
+          Promise.resolve(
+            operation(),
+          );
+      } catch (error) {
+        throw error;
+      }
+
+      initialAckInFlight =
+        promise;
+
+      try {
+        return await promise;
+      } finally {
+        /*
+         * Do not clear a newer request if
+         * something replaced the reference.
+         */
+        if (
+          initialAckInFlight ===
+          promise
+        ) {
+          initialAckInFlight =
+            null;
+        }
+      }
+    };
+
+  const waitForInitialAck =
+    async (): Promise<void> => {
+      const current =
+        initialAckInFlight;
+
+      if (!current) {
+        return;
+      }
+
+      try {
+        await current;
+      } catch {
+        /*
+         * The caller below re-checks Discord.js
+         * state and chooses the appropriate path.
+         */
+      }
+    };
+
   const beginAutomaticAck =
-    (): Promise<any> => {
+    async (): Promise<any> => {
       if (
         disposed ||
         interaction.replied ||
         interaction.deferred
       ) {
-        return Promise.resolve(
-          undefined,
-        );
+        return undefined;
       }
 
+      /*
+       * An explicit reply/defer may already be
+       * on the wire even though discord.js has
+       * not changed replied/deferred yet.
+       *
+       * Never race it with another callback.
+       */
       if (
-        automaticAck
+        initialAckInFlight
       ) {
-        return automaticAck;
+        return initialAckInFlight;
       }
 
       console.warn(
@@ -160,52 +311,56 @@ export function installInteractionDeadlineGuard(
         ),
       );
 
-      automaticAck =
-        originalDeferReply({
-          flags:
-            MessageFlags
-              .Ephemeral,
-        })
-          .catch(
-            (error:
-              unknown) => {
-              if (
-                !isUnknownInteractionError(
-                  error,
-                )
-              ) {
-                console.error(
-                  "❌ Automatic interaction defer failed:",
-                  error,
-                );
-              }
-
-              throw error;
-            },
+      try {
+        return await runInitialAck(
+          () =>
+            originalDeferReply({
+              flags:
+                MessageFlags
+                  .Ephemeral,
+            }),
+        );
+      } catch (
+        error
+      ) {
+        /*
+         * 40060 means another acknowledgement
+         * won the race. It is not a command
+         * failure and must not create noisy logs.
+         */
+        if (
+          isAlreadyAcknowledgedError(
+            error,
           )
-          .finally(
-            () => {
-              automaticAck =
-                null;
-            },
-          );
+        ) {
+          return undefined;
+        }
 
-      return automaticAck;
+        if (
+          !isUnknownInteractionError(
+            error,
+          )
+        ) {
+          console.error(
+            "❌ Automatic interaction defer failed:",
+            error,
+          );
+        }
+
+        throw error;
+      }
     };
 
   mutable.reply =
     async (
-      options: any,
+      options:
+        any,
     ): Promise<any> => {
-      if (
-        automaticAck
-      ) {
-        try {
-          await automaticAck;
-        } catch {
-          // Fall through.
-        }
-      }
+      /*
+       * Auto-defer or another explicit initial
+       * acknowledgement may currently be pending.
+       */
+      await waitForInitialAck();
 
       if (
         interaction.deferred &&
@@ -226,20 +381,57 @@ export function installInteractionDeadlineGuard(
         );
       }
 
-      return originalReply(
-        options,
-      );
+      try {
+        return await runInitialAck(
+          () =>
+            originalReply(
+              options,
+            ),
+        );
+      } catch (
+        error
+      ) {
+        /*
+         * Defensive recovery for an acknowledgement
+         * performed elsewhere on the same object.
+         */
+        if (
+          isAlreadyAcknowledgedError(
+            error,
+          )
+        ) {
+          await Promise.resolve();
+
+          if (
+            interaction.deferred &&
+            !interaction.replied
+          ) {
+            return originalEditReply(
+              toEditOptions(
+                options,
+              ),
+            );
+          }
+
+          if (
+            interaction.replied
+          ) {
+            return originalFollowUp(
+              options,
+            );
+          }
+        }
+
+        throw error;
+      }
     };
 
   mutable.deferReply =
     async (
-      options: any = {},
+      options:
+        any = {},
     ): Promise<any> => {
-      if (
-        automaticAck
-      ) {
-        return automaticAck;
-      }
+      await waitForInitialAck();
 
       if (
         interaction.deferred ||
@@ -248,9 +440,26 @@ export function installInteractionDeadlineGuard(
         return undefined;
       }
 
-      return originalDeferReply(
-        options,
-      );
+      try {
+        return await runInitialAck(
+          () =>
+            originalDeferReply(
+              options,
+            ),
+        );
+      } catch (
+        error
+      ) {
+        if (
+          isAlreadyAcknowledgedError(
+            error,
+          )
+        ) {
+          return undefined;
+        }
+
+        throw error;
+      }
     };
 
   const timer =
