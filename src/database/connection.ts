@@ -88,6 +88,14 @@ import {
   CommunityLogRecord,
 } from "../models/CommunityLogRecord.js";
 
+import {
+  DatingProfile,
+} from "../models/DatingProfile.js";
+
+import {
+  DatingMatch,
+} from "../models/DatingMatch.js";
+
 export async function connectDatabase():
   Promise<void> {
   try {
@@ -128,6 +136,8 @@ export async function connectDatabase():
       DungeonItem.createIndexes(),
       DungeonMaterial.createIndexes(),
       CommunityLogRecord.createIndexes(),
+      DatingProfile.createIndexes(),
+      DatingMatch.createIndexes(),
     ]);
 
     console.log(
