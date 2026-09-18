@@ -24,7 +24,8 @@
     "test:matchmaking": "npm run build && node scripts/matchmaking-smoke-test.mjs",
     "test:cards": "npm run build && node scripts/card-game-smoke-test.mjs",
     "test:puzzle": "npm run build && node scripts/puzzle-smoke-test.mjs",
-    "test:minigames": "npm run build && node scripts/minigame-smoke-test.mjs"
+    "test:minigames": "npm run build && node scripts/minigame-smoke-test.mjs",
+    "test:marketplace:production": "npm run build && node scripts/marketplace-production-e2e-test.mjs"
   },
   "engines": {
     "node": ">=22.0.0"

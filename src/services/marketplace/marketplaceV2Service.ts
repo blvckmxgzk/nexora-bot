@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 
+import mongoose from "mongoose";
+
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -705,13 +707,13 @@ export const marketplaceV2Service = {
     actorId:
       string,
   ) {
-    const request =
+    const current =
       await requireRequest(
         requestId,
       );
 
     if (
-      request.sellerId !==
+      current.sellerId !==
       actorId
     ) {
       throw new Error(
@@ -719,22 +721,46 @@ export const marketplaceV2Service = {
       );
     }
 
-    if (
-      request.status !==
-      "waiting_seller"
-    ) {
+    const request =
+      await TradeRequest
+        .findOneAndUpdate(
+          {
+            requestId,
+
+            sellerId:
+              actorId,
+
+            status:
+              "waiting_seller",
+          },
+          {
+            $set: {
+              status:
+                "contacted",
+
+              contactedAt:
+                new Date(),
+            },
+          },
+          {
+            new:
+              true,
+          },
+        );
+
+    if (!request) {
+      const latest =
+        await requireRequest(
+          requestId,
+        );
+
       throw new Error(
-        "Trade Request นี้ไม่ได้อยู่ในสถานะรอ Seller แล้ว",
+        latest.status ===
+          "contacted"
+          ? "Trade Request นี้ถูก Seller ตอบรับไปแล้ว"
+          : "Trade Request นี้ไม่ได้อยู่ในสถานะรอ Seller แล้ว",
       );
     }
-
-    request.status =
-      "contacted";
-
-    request.contactedAt =
-      new Date();
-
-    await request.save();
 
     await dm(
       client,
@@ -806,8 +832,7 @@ export const marketplaceV2Service = {
         userId:
           request.buyerId,
 
-        actorId:
-          actorId,
+        actorId,
 
         metadata: {
           requestId,
@@ -828,13 +853,13 @@ export const marketplaceV2Service = {
     actorId:
       string,
   ) {
-    const request =
+    const current =
       await requireRequest(
         requestId,
       );
 
     if (
-      request.buyerId !==
+      current.buyerId !==
       actorId
     ) {
       throw new Error(
@@ -842,22 +867,46 @@ export const marketplaceV2Service = {
       );
     }
 
-    if (
-      request.status !==
-      "contacted"
-    ) {
+    const request =
+      await TradeRequest
+        .findOneAndUpdate(
+          {
+            requestId,
+
+            buyerId:
+              actorId,
+
+            status:
+              "contacted",
+          },
+          {
+            $set: {
+              status:
+                "buyer_confirmed",
+
+              buyerConfirmedAt:
+                new Date(),
+            },
+          },
+          {
+            new:
+              true,
+          },
+        );
+
+    if (!request) {
+      const latest =
+        await requireRequest(
+          requestId,
+        );
+
       throw new Error(
-        "Trade นี้ยังไม่พร้อมให้ Buyer ยืนยัน",
+        latest.status ===
+          "buyer_confirmed"
+          ? "Buyer ยืนยัน Trade นี้ไปแล้ว"
+          : "Trade นี้ยังไม่พร้อมให้ Buyer ยืนยัน",
       );
     }
-
-    request.status =
-      "buyer_confirmed";
-
-    request.buyerConfirmedAt =
-      new Date();
-
-    await request.save();
 
     await dm(
       client,
@@ -911,106 +960,177 @@ export const marketplaceV2Service = {
     actorId:
       string,
   ) {
-    const request =
-      await requireRequest(
-        requestId,
-      );
+    const mongoSession =
+      await mongoose
+        .startSession();
 
-    if (
-      request.sellerId !==
-      actorId
-    ) {
+    let request:
+      any =
+        null;
+
+    try {
+      await mongoSession
+        .withTransaction(
+          async () => {
+            const current =
+              await TradeRequest
+                .findOne({
+                  requestId,
+                })
+                .session(
+                  mongoSession,
+                );
+
+            if (!current) {
+              throw new Error(
+                "ไม่พบ Trade Request นี้",
+              );
+            }
+
+            if (
+              current.sellerId !==
+              actorId
+            ) {
+              throw new Error(
+                "เฉพาะ Seller ของ Trade นี้เท่านั้นที่ยืนยันได้",
+              );
+            }
+
+            if (
+              current.status !==
+              "buyer_confirmed"
+            ) {
+              throw new Error(
+                current.status ===
+                  "completed"
+                  ? "Trade นี้เสร็จสมบูรณ์ไปแล้ว"
+                  : "Trade นี้ยังไม่พร้อมให้ Seller ยืนยัน",
+              );
+            }
+
+            const quantity =
+              Math.max(
+                1,
+                Number(
+                  current.quantity ??
+                  1,
+                ),
+              );
+
+            const product =
+              await Product
+                .findOneAndUpdate(
+                  {
+                    productId:
+                      current.productId,
+
+                    active:
+                      true,
+
+                    stock: {
+                      $gte:
+                        quantity,
+                    },
+                  },
+                  {
+                    $inc: {
+                      stock:
+                        -quantity,
+
+                      sold:
+                        quantity,
+                    },
+                  },
+                  {
+                    new:
+                      true,
+
+                    session:
+                      mongoSession,
+                  },
+                );
+
+            if (!product) {
+              throw new Error(
+                "สินค้าเหลือไม่เพียงพอสำหรับปิด Trade นี้ กรุณาตรวจสอบ Stock ก่อน",
+              );
+            }
+
+            if (
+              Number(
+                product.stock,
+              ) <=
+              0
+            ) {
+              product.active =
+                false;
+
+              await product.save({
+                session:
+                  mongoSession,
+              });
+            }
+
+            current.status =
+              "completed";
+
+            current.completedAt =
+              new Date();
+
+            current.openKey =
+              undefined;
+
+            current.markModified(
+              "openKey",
+            );
+
+            await current.save({
+              session:
+                mongoSession,
+            });
+
+            const shopUpdate =
+              await Shop
+                .updateOne(
+                  {
+                    shopId:
+                      current.shopId,
+                  },
+                  {
+                    $inc: {
+                      completedOrders:
+                        1,
+                    },
+                  },
+                  {
+                    session:
+                      mongoSession,
+                  },
+                );
+
+            if (
+              shopUpdate.matchedCount !==
+              1
+            ) {
+              throw new Error(
+                "ไม่พบร้านค้าของ Trade นี้",
+              );
+            }
+
+            request =
+              current;
+          },
+        );
+    } finally {
+      await mongoSession
+        .endSession();
+    }
+
+    if (!request) {
       throw new Error(
-        "เฉพาะ Seller ของ Trade นี้เท่านั้นที่ยืนยันได้",
+        "ไม่สามารถปิด Trade ได้",
       );
     }
-
-    if (
-      request.status !==
-      "buyer_confirmed"
-    ) {
-      throw new Error(
-        "Trade นี้ยังไม่พร้อมให้ Seller ยืนยัน",
-      );
-    }
-
-    request.status =
-      "completed";
-
-    request.completedAt =
-      new Date();
-
-    await closeOpenKey(
-      request,
-    );
-
-    await request.save();
-
-    const product =
-      await Product.findOne({
-        productId:
-          request.productId,
-      });
-
-    if (product) {
-      const quantity =
-        Math.max(
-          1,
-          Number(
-            request.quantity ??
-            1,
-          ),
-        );
-
-      const stockDecrease =
-        Math.min(
-          Number(
-            product.stock ??
-            0,
-          ),
-          quantity,
-        );
-
-      product.stock =
-        Math.max(
-          0,
-          Number(
-            product.stock ??
-            0,
-          ) -
-          stockDecrease,
-        );
-
-      product.sold =
-        Number(
-          product.sold ??
-          0,
-        ) +
-        quantity;
-
-      if (
-        product.stock <=
-        0
-      ) {
-        product.active =
-          false;
-      }
-
-      await product.save();
-    }
-
-    await Shop.findOneAndUpdate(
-      {
-        shopId:
-          request.shopId,
-      },
-      {
-        $inc: {
-          completedOrders:
-            1,
-        },
-      },
-    );
 
     await dm(
       client,
@@ -1089,8 +1209,10 @@ export const marketplaceV2Service = {
 
         metadata: {
           requestId,
+
           shopId:
             request.shopId,
+
           productId:
             request.productId,
         },
@@ -1113,15 +1235,15 @@ export const marketplaceV2Service = {
     reason =
       "ยกเลิกโดยผู้เข้าร่วม Trade",
   ) {
-    const request =
+    const current =
       await requireRequest(
         requestId,
       );
 
     if (
-      request.buyerId !==
+      current.buyerId !==
         actorId &&
-      request.sellerId !==
+      current.sellerId !==
         actorId
     ) {
       throw new Error(
@@ -1129,26 +1251,7 @@ export const marketplaceV2Service = {
       );
     }
 
-    if (
-      !OPEN_STATUSES.includes(
-        request.status,
-      )
-    ) {
-      throw new Error(
-        "Trade นี้ไม่สามารถยกเลิกได้แล้ว",
-      );
-    }
-
-    request.status =
-      "cancelled";
-
-    request.cancelledAt =
-      new Date();
-
-    request.cancelledBy =
-      actorId;
-
-    request.cancelReason =
+    const cleanReason =
       reason
         .trim()
         .slice(
@@ -1156,11 +1259,60 @@ export const marketplaceV2Service = {
           500,
         );
 
-    await closeOpenKey(
-      request,
-    );
+    const request =
+      await TradeRequest
+        .findOneAndUpdate(
+          {
+            requestId,
 
-    await request.save();
+            status: {
+              $in:
+                OPEN_STATUSES,
+            },
+
+            $or: [
+              {
+                buyerId:
+                  actorId,
+              },
+
+              {
+                sellerId:
+                  actorId,
+              },
+            ],
+          },
+          {
+            $set: {
+              status:
+                "cancelled",
+
+              cancelledAt:
+                new Date(),
+
+              cancelledBy:
+                actorId,
+
+              cancelReason:
+                cleanReason,
+            },
+
+            $unset: {
+              openKey:
+                1,
+            },
+          },
+          {
+            new:
+              true,
+          },
+        );
+
+    if (!request) {
+      throw new Error(
+        "Trade นี้ไม่สามารถยกเลิกได้แล้ว",
+      );
+    }
 
     const message = [
       "❌ **Trade Request ถูกยกเลิก**",
@@ -1278,37 +1430,6 @@ export const marketplaceV2Service = {
     comment:
       string,
   ) {
-    const request =
-      await requireRequest(
-        requestId,
-      );
-
-    if (
-      request.buyerId !==
-      buyerId
-    ) {
-      throw new Error(
-        "เฉพาะ Buyer ของ Trade นี้เท่านั้นที่รีวิวได้",
-      );
-    }
-
-    if (
-      request.status !==
-      "completed"
-    ) {
-      throw new Error(
-        "รีวิวได้เฉพาะ Trade ที่เสร็จสมบูรณ์แล้ว",
-      );
-    }
-
-    if (
-      request.reviewedAt
-    ) {
-      throw new Error(
-        "Trade นี้ถูกรีวิวไปแล้ว",
-      );
-    }
-
     if (
       !Number.isInteger(
         rating,
@@ -1331,71 +1452,148 @@ export const marketplaceV2Service = {
           1000,
         );
 
-    const syntheticOrderId =
-      `TRADE:${request.requestId}`;
+    const mongoSession =
+      await mongoose
+        .startSession();
 
-    const existing =
-      await Review.findOne({
-        $or: [
-          {
-            tradeRequestId:
-              request.requestId,
+    let review:
+      any =
+        null;
+
+    let request:
+      any =
+        null;
+
+    try {
+      await mongoSession
+        .withTransaction(
+          async () => {
+            const current =
+              await TradeRequest
+                .findOne({
+                  requestId,
+                })
+                .session(
+                  mongoSession,
+                );
+
+            if (!current) {
+              throw new Error(
+                "ไม่พบ Trade Request นี้",
+              );
+            }
+
+            if (
+              current.buyerId !==
+              buyerId
+            ) {
+              throw new Error(
+                "เฉพาะ Buyer ของ Trade นี้เท่านั้นที่รีวิวได้",
+              );
+            }
+
+            if (
+              current.status !==
+              "completed"
+            ) {
+              throw new Error(
+                "รีวิวได้เฉพาะ Trade ที่เสร็จสมบูรณ์แล้ว",
+              );
+            }
+
+            if (
+              current.reviewedAt
+            ) {
+              throw new Error(
+                "Trade นี้ถูกรีวิวไปแล้ว",
+              );
+            }
+
+            const syntheticOrderId =
+              `TRADE:${current.requestId}`;
+
+            const created =
+              await Review
+                .create(
+                  [
+                    {
+                      reviewId:
+                        generateId(
+                          "REV",
+                        ),
+
+                      orderId:
+                        syntheticOrderId,
+
+                      tradeRequestId:
+                        current.requestId,
+
+                      shopId:
+                        current.shopId,
+
+                      productId:
+                        current.productId,
+
+                      buyerId:
+                        current.buyerId,
+
+                      sellerId:
+                        current.sellerId,
+
+                      rating,
+
+                      comment:
+                        cleanComment,
+                    },
+                  ],
+                  {
+                    session:
+                      mongoSession,
+                  },
+                );
+
+            review =
+              created[0];
+
+            current.reviewedAt =
+              new Date();
+
+            await current.save({
+              session:
+                mongoSession,
+            });
+
+            request =
+              current;
           },
+        );
+    } catch (
+      error:
+        any
+    ) {
+      if (
+        error?.code ===
+        11000
+      ) {
+        throw new Error(
+          "Trade นี้ถูกรีวิวไปแล้ว",
+        );
+      }
 
-          {
-            orderId:
-              syntheticOrderId,
-          },
-        ],
-      });
-
-    if (existing) {
-      request.reviewedAt =
-        request.reviewedAt ??
-        new Date();
-
-      await request.save();
-
-      throw new Error(
-        "Trade นี้ถูกรีวิวไปแล้ว",
-      );
+      throw error;
+    } finally {
+      await mongoSession
+        .endSession();
     }
 
-    const review =
-      await Review.create({
-        reviewId:
-          generateId(
-            "REV",
-          ),
-
-        orderId:
-          syntheticOrderId,
-
-        tradeRequestId:
-          request.requestId,
-
-        shopId:
-          request.shopId,
-
-        productId:
-          request.productId,
-
-        buyerId:
-          request.buyerId,
-
-        sellerId:
-          request.sellerId,
-
-        rating,
-
-        comment:
-          cleanComment,
-      });
-
-    request.reviewedAt =
-      new Date();
-
-    await request.save();
+    if (
+      !review ||
+      !request
+    ) {
+      throw new Error(
+        "ไม่สามารถสร้าง Review ได้",
+      );
+    }
 
     await recalculateRating(
       request.shopId,
@@ -1462,7 +1660,10 @@ export const marketplaceV2Service = {
     client:
       Client,
   ) {
-    const requests =
+    const now =
+      new Date();
+
+    const candidates =
       await TradeRequest
         .find({
           status:
@@ -1470,8 +1671,12 @@ export const marketplaceV2Service = {
 
           expiresAt: {
             $lte:
-              new Date(),
+              now,
           },
+        })
+        .select({
+          _id:
+            1,
         })
         .limit(
           100,
@@ -1481,20 +1686,47 @@ export const marketplaceV2Service = {
       0;
 
     for (
-      const request of
-        requests
+      const candidate of
+        candidates
     ) {
-      request.status =
-        "expired";
+      const request =
+        await TradeRequest
+          .findOneAndUpdate(
+            {
+              _id:
+                candidate._id,
 
-      request.expiredAt =
-        new Date();
+              status:
+                "waiting_seller",
 
-      await closeOpenKey(
-        request,
-      );
+              expiresAt: {
+                $lte:
+                  now,
+              },
+            },
+            {
+              $set: {
+                status:
+                  "expired",
 
-      await request.save();
+                expiredAt:
+                  now,
+              },
+
+              $unset: {
+                openKey:
+                  1,
+              },
+            },
+            {
+              new:
+                true,
+            },
+          );
+
+      if (!request) {
+        continue;
+      }
 
       expired +=
         1;
@@ -1547,42 +1779,70 @@ export const marketplaceV2Service = {
     reason:
       string,
   ) {
-    const request =
-      await requireRequest(
-        requestId,
-      );
-
-    if (
-      !OPEN_STATUSES.includes(
-        request.status,
-      )
-    ) {
-      throw new Error(
-        "Trade นี้ปิดไปแล้ว",
-      );
-    }
-
-    request.status =
-      "cancelled";
-
-    request.cancelledAt =
-      new Date();
-
-    request.cancelledBy =
-      actorId;
-
-    request.cancelReason =
+    const cleanReason =
       `Staff: ${reason}`
         .slice(
           0,
           500,
         );
 
-    await closeOpenKey(
-      request,
-    );
+    const request =
+      await TradeRequest
+        .findOneAndUpdate(
+          {
+            requestId,
 
-    await request.save();
+            status: {
+              $in:
+                OPEN_STATUSES,
+            },
+          },
+          {
+            $set: {
+              status:
+                "cancelled",
+
+              cancelledAt:
+                new Date(),
+
+              cancelledBy:
+                actorId,
+
+              cancelReason:
+                cleanReason,
+            },
+
+            $unset: {
+              openKey:
+                1,
+            },
+          },
+          {
+            new:
+              true,
+          },
+        );
+
+    if (!request) {
+      const current =
+        await requireRequest(
+          requestId,
+        );
+
+      if (
+        !OPEN_STATUSES.includes(
+          current.status,
+        )
+      ) {
+        throw new Error(
+          "Trade นี้ปิดไปแล้ว",
+        );
+      }
+
+      throw new Error(
+        "ไม่สามารถยกเลิก Trade นี้ได้",
+      );
+    }
 
     await Promise.all([
       dm(
