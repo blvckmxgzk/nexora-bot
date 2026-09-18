@@ -56,6 +56,26 @@ import {
   Giveaway,
 } from "../models/Giveaway.js";
 
+import {
+  AnalyticsSnapshot,
+} from "../models/AnalyticsSnapshot.js";
+
+import {
+  MemberDailyActivity,
+} from "../models/MemberDailyActivity.js";
+
+import {
+  Ticket,
+} from "../models/Ticket.js";
+
+import {
+  DungeonRun,
+} from "../models/DungeonRun.js";
+
+import {
+  CommunityLogRecord,
+} from "../models/CommunityLogRecord.js";
+
 export async function connectDatabase():
   Promise<void> {
   try {
@@ -88,6 +108,11 @@ export async function connectDatabase():
       ModerationLog.createIndexes(),
       SystemState.createIndexes(),
       Giveaway.createIndexes(),
+      AnalyticsSnapshot.createIndexes(),
+      MemberDailyActivity.createIndexes(),
+      Ticket.createIndexes(),
+      DungeonRun.createIndexes(),
+      CommunityLogRecord.createIndexes(),
     ]);
 
     console.log(

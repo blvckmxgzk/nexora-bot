@@ -57,6 +57,10 @@ import {
   giveawayRuntime,
 } from "./services/giveawayRuntime.js";
 
+import {
+  analyticsRuntime,
+} from "./services/analyticsRuntime.js";
+
 const client =
   new Client({
     intents: [
@@ -195,6 +199,11 @@ async function bootstrap():
       client,
     );
 
+  analyticsRuntime
+    .start(
+      client,
+    );
+
   const apiServer =
     await createApiServer();
 
@@ -248,6 +257,9 @@ async function bootstrap():
       /*
        * Stop event-producing runtimes first.
        */
+      analyticsRuntime
+        .stop();
+
       giveawayRuntime
         .stop();
 
