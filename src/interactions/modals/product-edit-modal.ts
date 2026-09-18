@@ -6,6 +6,10 @@ import {
 import { Product } from "../../models/Product.js";
 import { Shop } from "../../models/Shop.js";
 
+import {
+  syncShopForumSafe,
+} from "../../services/shopForumService.js";
+
 const categories = [
   "game_topup",
   "game_keys",
@@ -147,6 +151,12 @@ export async function execute(
     category as typeof product.category;
 
   await product.save();
+
+  await syncShopForumSafe(
+    interaction.client,
+    shop.shopId,
+    "product_edited",
+  );
 
   const embed =
     new EmbedBuilder()

@@ -6,6 +6,10 @@ import {
 import { Product } from "../../models/Product.js";
 import { Shop } from "../../models/Shop.js";
 
+import {
+  syncShopForumSafe,
+} from "../../services/shopForumService.js";
+
 export const customId =
   "nexora_product_stock_modal:";
 
@@ -79,6 +83,12 @@ export async function execute(
     stock;
 
   await product.save();
+
+  await syncShopForumSafe(
+    interaction.client,
+    shop.shopId,
+    "product_stock_updated",
+  );
 
   const embed =
     new EmbedBuilder()

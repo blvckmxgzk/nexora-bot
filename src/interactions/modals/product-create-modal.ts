@@ -8,6 +8,10 @@ import { randomUUID } from "node:crypto";
 import { Shop } from "../../models/Shop.js";
 import { Product } from "../../models/Product.js";
 
+import {
+  syncShopForumSafe,
+} from "../../services/shopForumService.js";
+
 export const customId =
   "nexora_product_create_modal";
 
@@ -161,6 +165,12 @@ export async function execute(
 
       active: true,
     });
+
+  await syncShopForumSafe(
+    interaction.client,
+    shop.shopId,
+    "product_created",
+  );
 
   const embed =
     new EmbedBuilder()

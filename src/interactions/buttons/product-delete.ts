@@ -9,6 +9,10 @@ import {
 import { Product } from "../../models/Product.js";
 import { Shop } from "../../models/Shop.js";
 
+import {
+  syncShopForumSafe,
+} from "../../services/shopForumService.js";
+
 export const customId =
   "nexora_product_delete:";
 
@@ -115,6 +119,12 @@ export async function execute(
   product.stock = 0;
 
   await product.save();
+
+  await syncShopForumSafe(
+    interaction.client,
+    shop.shopId,
+    "product_deleted",
+  );
 
   await interaction.update({
     content:

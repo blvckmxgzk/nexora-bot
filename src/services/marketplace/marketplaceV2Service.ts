@@ -30,6 +30,10 @@ import {
 } from "../shopHoursService.js";
 
 import {
+  syncShopForumSafe,
+} from "../shopForumService.js";
+
+import {
   communityLoggingService,
 } from "../logging/communityLoggingService.js";
 
@@ -1132,6 +1136,12 @@ export const marketplaceV2Service = {
       );
     }
 
+    await syncShopForumSafe(
+      client,
+      request.shopId,
+      "trade_completed",
+    );
+
     await dm(
       client,
       request.buyerId,
@@ -1597,6 +1607,12 @@ export const marketplaceV2Service = {
 
     await recalculateRating(
       request.shopId,
+    );
+
+    await syncShopForumSafe(
+      client,
+      request.shopId,
+      "review_created",
     );
 
     await logMarketplace(

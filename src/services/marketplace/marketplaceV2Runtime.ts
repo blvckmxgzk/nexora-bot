@@ -11,6 +11,10 @@ import {
   marketplaceV2Service,
 } from "./marketplaceV2Service.js";
 
+import {
+  syncAllShopForums,
+} from "../shopForumService.js";
+
 const INTERVAL_MS =
   10 *
   60 *
@@ -158,8 +162,13 @@ class MarketplaceV2Runtime {
               client,
             );
 
+        const forumSync =
+          await syncAllShopForums(
+            client,
+          );
+
         console.log(
-          `🛒 Marketplace v2 ready • expired=${expired}`,
+          `🛒 Marketplace v2 ready • expired=${expired} • forums=${forumSync.synced}/${forumSync.total} • failed=${forumSync.failed}`,
         );
 
         this.timer =

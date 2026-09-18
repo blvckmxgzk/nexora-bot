@@ -258,3 +258,113 @@ export async function updateShopForum(
     );
   }
 }
+
+
+/*
+ * Safe event-driven Forum synchronization.
+ *
+ * Marketplace data mutation must never fail only because
+ * Discord temporarily rejected a Forum message update.
+ */
+export async function syncShopForumSafe(
+  client:
+    Client,
+
+  shopId:
+    string,
+
+  context =
+    "marketplace",
+): Promise<boolean> {
+  try {
+    await updateShopForum(
+      client,
+      shopId,
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      `⚠️ Shop Forum sync failed • ${context} • ${shopId}:`,
+      error,
+    );
+
+    return false;
+  }
+}
+
+/*
+ * Startup reconciliation.
+ *
+ * Fixes Forum cards that became stale before this sync system
+ * existed, or if Discord was temporarily unavailable during a
+ * previous mutation.
+ */
+export async function syncAllShopForums(
+  client:
+    Client,
+): Promise<{
+  total:
+    number;
+
+  synced:
+    number;
+
+  failed:
+    number;
+}> {
+  const shops =
+    await Shop
+      .find({
+        forumThreadId: {
+          $ne:
+            null,
+        },
+
+        deletedAt:
+          null,
+      })
+      .select({
+        shopId:
+          1,
+      })
+      .sort({
+        createdAt:
+          1,
+      });
+
+  let synced =
+    0;
+
+  let failed =
+    0;
+
+  for (
+    const shop of
+    shops
+  ) {
+    const success =
+      await syncShopForumSafe(
+        client,
+        shop.shopId,
+        "startup_reconciliation",
+      );
+
+    if (success) {
+      synced +=
+        1;
+    } else {
+      failed +=
+        1;
+    }
+  }
+
+  return {
+    total:
+      shops.length,
+
+    synced,
+
+    failed,
+  };
+}
