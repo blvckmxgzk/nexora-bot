@@ -31,12 +31,6 @@ export async function execute(
       >
     >;
 
-  /*
-   * Mongo archive ก่อน Discord cleanup
-   *
-   * ถ้า financial preflight fail
-   * ห้ามแตะ Forum / Role
-   */
   try {
     archived =
       await shopArchiveService
@@ -48,17 +42,21 @@ export async function execute(
             interaction.user.id,
 
           reason:
-            "Seller requested permanent marketplace archive",
+            "Seller requested Marketplace v2 archive",
         });
   } catch (error) {
     await interaction.editReply({
       content:
-        error instanceof Error
+        error instanceof
+          Error
           ? `❌ ${error.message}`
-          : "❌ ไม่สามารถ archive ร้านค้าได้",
+          : "❌ ไม่สามารถ Archive ร้านค้าได้",
 
-      embeds: [],
-      components: [],
+      embeds:
+        [],
+
+      components:
+        [],
     });
 
     return;
@@ -70,11 +68,6 @@ export async function execute(
   let forumDeleteFailed =
     false;
 
-  /*
-   * Mongo เป็น source of truth แล้ว
-   * Discord cleanup หลังจากนี้เป็น
-   * best-effort side effect
-   */
   if (
     archived.forumThreadId
   ) {
@@ -90,7 +83,7 @@ export async function execute(
         thread.isThread()
       ) {
         await thread.delete(
-          "NEXORA Marketplace - Shop financially archived",
+          "NEXORA Marketplace v2 - Shop archived",
         );
       }
     } catch (error) {
@@ -104,7 +97,9 @@ export async function execute(
     }
   }
 
-  if (interaction.guild) {
+  if (
+    interaction.guild
+  ) {
     try {
       const member =
         await interaction.guild
@@ -132,7 +127,6 @@ export async function execute(
       ) {
         await member.roles.remove(
           generalRole,
-
           `NEXORA Marketplace - Shop archived: ${shop.shopId}`,
         );
       }
@@ -145,13 +139,12 @@ export async function execute(
       ) {
         await member.roles.remove(
           verifiedRole,
-
           `NEXORA Marketplace - Shop archived: ${shop.shopId}`,
         );
       }
     } catch (error) {
       console.error(
-        "⚠️ Failed to remove archived Shop seller roles:",
+        "⚠️ Failed to remove archived Shop roles:",
         error,
       );
     }
@@ -173,32 +166,35 @@ export async function execute(
         [
           `ร้าน **${shop.name}** ถูกนำออกจาก Marketplace แล้ว`,
           "",
-          "✅ ปิดการรับ Order ใหม่",
-          "✅ เก็บ Shop ID และประวัติทางการเงินไว้",
-          "✅ Order / Payment / Refund / Ledger / Payout เดิมไม่ถูกลบ",
+          "✅ หยุดรับ Trade Request ใหม่",
+          "✅ เก็บ Shop ID และ Trade history",
           "✅ ลบ Seller roles",
           forumDeleteFailed
             ? "⚠️ Forum cleanup ไม่สำเร็จ"
             : "✅ ลบ Forum thread",
           "",
-          "💰 หากยังมียอดคงเหลือ คุณยังสามารถจัดการการถอนเงินจากหน้า Shop Management ได้",
+          "Buyer และ Seller ดำเนินธุรกรรมกันโดยตรง",
           "",
-          "ร้านที่ archive แล้วจะไม่ถูกเปิดกลับด้วยปุ่ม Reopen เดิม",
+          "ร้านที่ Archive แล้วจะไม่ถูกเปิดกลับด้วยปุ่ม Reopen",
         ].join(
           "\n",
         ),
       )
       .setFooter({
         text:
-          "NEXORA Marketplace • Financial History Preserved",
+          "NEXORA Marketplace v2 • Trade History Preserved",
       })
       .setTimestamp();
 
   await interaction.editReply({
-    content: "",
+    content:
+      "",
+
     embeds: [
       embed,
     ],
-    components: [],
+
+    components:
+      [],
   });
 }

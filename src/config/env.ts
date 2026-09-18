@@ -1,154 +1,130 @@
 import "dotenv/config";
-import { z } from "zod";
 
-const envSchema = z.object({
-  DISCORD_TOKEN:
-    z.string().min(1),
+import {
+  z,
+} from "zod";
 
-  DISCORD_CLIENT_ID:
-    z.string().min(1),
+const envSchema =
+  z.object({
+    DISCORD_TOKEN:
+      z.string().min(1),
 
-  DISCORD_GUILD_ID:
-    z.string().min(1),
+    DISCORD_CLIENT_ID:
+      z.string().min(1),
 
-  MONGODB_URI:
-    z.string().min(1),
+    DISCORD_GUILD_ID:
+      z.string().min(1),
 
-  MARKETPLACE_MAINTENANCE:
-    z.enum([
-      "true",
-      "false",
-    ])
-      .default("true")
-      .transform(
-        (value) =>
-          value === "true",
-      ),
+    MONGODB_URI:
+      z.string().min(1),
 
-  MARKETPLACE_FORUM_CHANNEL_ID:
-    z.string().min(1),
-
-  MARKETPLACE_VERIFICATION_PANEL_CHANNEL_ID:
-    z.string().min(1),
-
-  MARKETPLACE_VERIFICATION_REVIEW_CHANNEL_ID:
-    z.string().min(1),
-
-  GENERAL_SELLER_ROLE_ID:
-    z.string().min(1),
-
-  VERIFIED_SELLER_ROLE_ID:
-    z.string().min(1),
-
-  /*
-   * Optional ตอน unit/integration tests
-   *
-   * Production safety guard จะบังคับ
-   * อีกชั้นใน bootstrap
-   */
-  OMISE_SECRET_KEY:
-    z.string()
-      .min(1)
-      .optional(),
-
-  OMISE_PUBLIC_KEY:
-    z.string()
-      .min(1)
-      .optional(),
-
-  OMISE_WEBHOOK_SECRET:
-    z.string()
-      .min(1)
-      .optional(),
-
-  NEXORA_PAYMENT_RETURN_URL:
-    z.string()
-      .url()
-      .optional(),
-
-  NEXORA_PUBLIC_API_URL:
-    z.string()
-      .url()
-      .optional(),
-
-  NEXORA_PAYMENT_METHODS:
-    z.string()
-      .min(1)
-      .optional(),
-
-  NEXORA_PAYMENT_APPROVED_CATEGORIES:
-    z.string()
-      .min(1)
-      .optional(),
-
-  NEXO_MINER_ANNOUNCEMENT_CHANNEL_ID:
-    z.string()
-      .min(1)
-      .optional(),
-
-  GROQ_API_KEY:
-    z.string()
-      .min(1)
-      .optional(),
-
-  GROQ_MODEL:
-    z.string()
-      .min(1)
-      .default(
-        "openai/gpt-oss-120b",
-      ),
-
-  NEXORA_AI_ENABLED:
-    z.enum([
-      "true",
-      "false",
-    ])
-      .default(
+    MARKETPLACE_MAINTENANCE:
+      z.enum([
         "true",
-      )
-      .transform(
-        (value) =>
-          value === "true",
-      ),
-
-  NEXORA_MESSAGE_CONTENT_INTENT:
-    z.enum([
-      "true",
-      "false",
-    ])
-      .default(
         "false",
-      )
-      .transform(
-        (value) =>
-          value === "true",
-      ),
+      ])
+        .default(
+          "false",
+        )
+        .transform(
+          (
+            value,
+          ) =>
+            value ===
+            "true",
+        ),
 
-  API_HOST:
-    z.string()
-      .min(1)
-      .default(
-        "0.0.0.0",
-      ),
+    MARKETPLACE_FORUM_CHANNEL_ID:
+      z.string().min(1),
 
-  API_PORT:
-    z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(65535)
-      .default(3000),
+    MARKETPLACE_VERIFICATION_PANEL_CHANNEL_ID:
+      z.string().min(1),
 
-  NODE_ENV:
-    z.enum([
-      "development",
-      "production",
-      "test",
-    ])
-      .default(
+    MARKETPLACE_VERIFICATION_REVIEW_CHANNEL_ID:
+      z.string().min(1),
+
+    GENERAL_SELLER_ROLE_ID:
+      z.string().min(1),
+
+    VERIFIED_SELLER_ROLE_ID:
+      z.string().min(1),
+
+    NEXORA_PUBLIC_API_URL:
+      z.string()
+        .url()
+        .optional(),
+
+    GROQ_API_KEY:
+      z.string()
+        .min(1)
+        .optional(),
+
+    GROQ_MODEL:
+      z.string()
+        .min(1)
+        .default(
+          "openai/gpt-oss-120b",
+        ),
+
+    NEXORA_AI_ENABLED:
+      z.enum([
+        "true",
+        "false",
+      ])
+        .default(
+          "true",
+        )
+        .transform(
+          (
+            value,
+          ) =>
+            value ===
+            "true",
+        ),
+
+    NEXORA_MESSAGE_CONTENT_INTENT:
+      z.enum([
+        "true",
+        "false",
+      ])
+        .default(
+          "false",
+        )
+        .transform(
+          (
+            value,
+          ) =>
+            value ===
+            "true",
+        ),
+
+    API_HOST:
+      z.string()
+        .min(1)
+        .default(
+          "0.0.0.0",
+        ),
+
+    API_PORT:
+      z.coerce
+        .number()
+        .int()
+        .min(1)
+        .max(65535)
+        .default(
+          3000,
+        ),
+
+    NODE_ENV:
+      z.enum([
         "development",
-      ),
-});
+        "production",
+        "test",
+      ])
+        .default(
+          "development",
+        ),
+  });
 
 const result =
   envSchema.safeParse(

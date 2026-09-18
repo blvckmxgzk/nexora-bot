@@ -42,8 +42,8 @@ export async function execute(
           "🛍️ **ดูร้านค้า**",
           "└─ เลือกดูร้านค้าและสินค้าต่าง ๆ ใน Marketplace",
           "",
-          "📦 **คำสั่งซื้อของฉัน**",
-          "└─ ตรวจสอบและติดตามคำสั่งซื้อของคุณ",
+          "📦 **Trade ของฉัน**",
+          "└─ ตรวจสอบ Trade Request ของคุณ",
           "",
           "⚙️ **จัดการร้านค้า**",
           "└─ จัดการร้าน สินค้า การตั้งค่า และข้อมูลของร้านคุณ",
@@ -54,7 +54,7 @@ export async function execute(
         ].join("\n"),
       )
       .setFooter({
-        text: "NEXORA Marketplace • ซื้อขายอย่างเป็นระบบ",
+        text: "NEXORA Marketplace v2 • Trade Handoff",
       })
       .setTimestamp();
 
@@ -75,7 +75,7 @@ export async function execute(
 
         new ButtonBuilder()
           .setCustomId("nexora_shop_orders")
-          .setLabel("คำสั่งซื้อของฉัน")
+          .setLabel("Trade ของฉัน")
           .setEmoji("📦")
           .setStyle(ButtonStyle.Secondary),
 

@@ -88,19 +88,44 @@ class MarketplaceV2Runtime {
         Client<true>,
     ): Promise<void> => {
       try {
-        /*
-         * Run exactly once.
-         *
-         * Do not override maintenance again after
-         * Staff intentionally changes it later.
-         */
-        if (
+        const forceMaintenance =
           process.env
-            .MARKETPLACE_MAINTENANCE !==
-          "true"
-        ) {
+            .MARKETPLACE_MAINTENANCE ===
+          "true";
+
+        const state =
           await SystemState
             .findOneAndUpdate(
+              {
+                _id:
+                  "global",
+              },
+
+              {
+                $setOnInsert: {
+                  marketplaceMaintenance:
+                    forceMaintenance,
+                },
+              },
+
+              {
+                upsert:
+                  true,
+
+                new:
+                  true,
+
+                setDefaultsOnInsert:
+                  true,
+              },
+            );
+
+        if (
+          !forceMaintenance &&
+          !state.marketplaceV2InitializedAt
+        ) {
+          await SystemState
+            .updateOne(
               {
                 _id:
                   "global",
@@ -108,6 +133,7 @@ class MarketplaceV2Runtime {
                 marketplaceV2InitializedAt:
                   null,
               },
+
               {
                 $set: {
                   marketplaceMaintenance:
@@ -122,16 +148,6 @@ class MarketplaceV2Runtime {
                   marketplaceV2InitializedAt:
                     new Date(),
                 },
-              },
-              {
-                upsert:
-                  true,
-
-                new:
-                  true,
-
-                setDefaultsOnInsert:
-                  true,
               },
             );
         }

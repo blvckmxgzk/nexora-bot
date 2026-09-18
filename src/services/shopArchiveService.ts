@@ -5,37 +5,13 @@ import {
 } from "../models/Shop.js";
 
 import {
-  Order,
-} from "../models/Order.js";
+  TradeRequest,
+} from "../models/TradeRequest.js";
 
-import {
-  Refund,
-} from "../models/Refund.js";
-
-import {
-  Payout,
-} from "../models/Payout.js";
-
-const ACTIVE_ORDER_STATUSES = [
-  "pending",
-  "awaiting_payment",
-  "paid",
-  "processing",
-  "disputed",
-];
-
-const ACTIVE_REFUND_STATUSES = [
-  "requested",
-  "approved",
-  "processing",
-  "failed",
-];
-
-const ACTIVE_PAYOUT_STATUSES = [
-  "reserved",
-  "creating_transfer",
-  "submitted",
-  "sent",
+const ACTIVE_TRADE_STATUSES = [
+  "waiting_seller",
+  "contacted",
+  "buyer_confirmed",
 ];
 
 export const shopArchiveService = {
@@ -56,7 +32,8 @@ export const shopArchiveService = {
         .startSession();
 
     let archivedShop:
-      any = null;
+      any =
+        null;
 
     let forumThreadId:
       string |
@@ -81,10 +58,9 @@ export const shopArchiveService = {
             );
           }
 
-          /*
-           * Idempotent archive
-           */
-          if (shop.deletedAt) {
+          if (
+            shop.deletedAt
+          ) {
             archivedShop =
               shop;
 
@@ -96,63 +72,26 @@ export const shopArchiveService = {
             return;
           }
 
-          const activeOrder =
-            await Order.exists({
-              shopId:
-                shop.shopId,
+          const activeTrade =
+            await TradeRequest
+              .exists({
+                shopId:
+                  shop.shopId,
 
-              status: {
-                $in:
-                  ACTIVE_ORDER_STATUSES,
-              },
-            })
+                status: {
+                  $in:
+                    ACTIVE_TRADE_STATUSES,
+                },
+              })
               .session(
                 session,
               );
 
-          if (activeOrder) {
+          if (
+            activeTrade
+          ) {
             throw new Error(
-              "ไม่สามารถ archive ร้านได้ เนื่องจากยังมีคำสั่งซื้อที่กำลังดำเนินการอยู่",
-            );
-          }
-
-          const activeRefund =
-            await Refund.exists({
-              shopId:
-                shop.shopId,
-
-              status: {
-                $in:
-                  ACTIVE_REFUND_STATUSES,
-              },
-            })
-              .session(
-                session,
-              );
-
-          if (activeRefund) {
-            throw new Error(
-              "ไม่สามารถ archive ร้านได้ เนื่องจากยังมี Refund ที่ต้องดำเนินการ",
-            );
-          }
-
-          const activePayout =
-            await Payout.exists({
-              sellerId:
-                shop.ownerId,
-
-              status: {
-                $in:
-                  ACTIVE_PAYOUT_STATUSES,
-              },
-            })
-              .session(
-                session,
-              );
-
-          if (activePayout) {
-            throw new Error(
-              "ไม่สามารถ archive ร้านได้ เนื่องจากยังมี Payout ที่กำลังดำเนินการอยู่",
+              "ไม่สามารถ Archive ร้านได้ เนื่องจากยังมี Trade Request ที่กำลังดำเนินการอยู่",
             );
           }
 
@@ -160,7 +99,7 @@ export const shopArchiveService = {
             shop.forumThreadId ??
             null;
 
-          const canRememberStatus =
+          const rememberStatus =
             shop.status ===
               "pending" ||
             shop.status ===
@@ -168,7 +107,7 @@ export const shopArchiveService = {
             shop.status ===
               "rejected";
 
-          const archived =
+          archivedShop =
             await Shop
               .findOneAndUpdate(
                 {
@@ -178,13 +117,14 @@ export const shopArchiveService = {
                   deletedAt:
                     null,
                 },
+
                 {
                   $set: {
                     status:
                       "closed",
 
                     closedFromStatus:
-                      canRememberStatus
+                      rememberStatus
                         ? shop.status
                         : (
                             shop.closedFromStatus ??
@@ -216,24 +156,28 @@ export const shopArchiveService = {
                       false,
                   },
                 },
+
                 {
-                  new: true,
+                  new:
+                    true,
+
                   session,
                 },
               );
 
-          if (!archived) {
+          if (
+            !archivedShop
+          ) {
             throw new Error(
-              "ไม่สามารถ archive ร้านค้าได้",
+              "ไม่สามารถ Archive ร้านค้าได้",
             );
           }
-
-          archivedShop =
-            archived;
         },
       );
 
-      if (!archivedShop) {
+      if (
+        !archivedShop
+      ) {
         throw new Error(
           "Shop archive ไม่ได้ผลลัพธ์",
         );
@@ -246,7 +190,8 @@ export const shopArchiveService = {
         forumThreadId,
       };
     } finally {
-      await session.endSession();
+      await session
+        .endSession();
     }
   },
 };

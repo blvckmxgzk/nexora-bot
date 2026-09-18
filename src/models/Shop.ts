@@ -53,7 +53,7 @@ const shopSchema =
        * Permanent archive:
        *
        * ห้าม hard-delete Shop ที่เคยมี
-       * financial history
+       * Marketplace history
        */
       archivedForumThreadId: {
         type: String,
@@ -142,27 +142,6 @@ const shopSchema =
         default: null,
       },
 
-      paymentMethods: {
-        type: [String],
-        enum: [
-          "promptpay",
-          "truemoney",
-        ],
-        default: [],
-      },
-
-      paymentDetails: {
-        promptpay: {
-          type: String,
-          default: null,
-        },
-
-        truemoney: {
-          type: String,
-          default: null,
-        },
-      },
-
       rating: {
         type: Number,
         default: 0,
@@ -242,7 +221,7 @@ const shopSchema =
   );
 
 /*
- * Archived Shop เป็น financial identity
+ * Archived Shop เป็น Marketplace identity
  * แบบ immutable
  *
  * ป้องกัน stale Discord button หรือ service
