@@ -108,6 +108,14 @@ import {
   MatchmakingSession,
 } from "../models/MatchmakingSession.js";
 
+import {
+  CardGameSession,
+} from "../models/CardGameSession.js";
+
+import {
+  CardGameStats,
+} from "../models/CardGameStats.js";
+
 export async function connectDatabase():
   Promise<void> {
   try {
@@ -153,6 +161,8 @@ export async function connectDatabase():
       MatchmakingProfile.createIndexes(),
       MatchmakingQueue.createIndexes(),
       MatchmakingSession.createIndexes(),
+      CardGameSession.createIndexes(),
+      CardGameStats.createIndexes(),
     ]);
 
     console.log(
