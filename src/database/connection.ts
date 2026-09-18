@@ -52,6 +52,10 @@ import {
   SystemState,
 } from "../models/SystemState.js";
 
+import {
+  Giveaway,
+} from "../models/Giveaway.js";
+
 export async function connectDatabase():
   Promise<void> {
   try {
@@ -83,6 +87,7 @@ export async function connectDatabase():
       Item.createIndexes(),
       ModerationLog.createIndexes(),
       SystemState.createIndexes(),
+      Giveaway.createIndexes(),
     ]);
 
     console.log(

@@ -53,6 +53,10 @@ import {
   marketplaceV2Runtime,
 } from "./services/marketplace/marketplaceV2Runtime.js";
 
+import {
+  giveawayRuntime,
+} from "./services/giveawayRuntime.js";
+
 const client =
   new Client({
     intents: [
@@ -186,6 +190,11 @@ async function bootstrap():
       client,
     );
 
+  giveawayRuntime
+    .start(
+      client,
+    );
+
   const apiServer =
     await createApiServer();
 
@@ -239,6 +248,9 @@ async function bootstrap():
       /*
        * Stop event-producing runtimes first.
        */
+      giveawayRuntime
+        .stop();
+
       marketplaceV2Runtime
         .stop();
 
