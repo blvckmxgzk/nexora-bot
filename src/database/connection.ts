@@ -73,6 +73,18 @@ import {
 } from "../models/DungeonRun.js";
 
 import {
+  DungeonProfile,
+} from "../models/DungeonProfile.js";
+
+import {
+  DungeonItem,
+} from "../models/DungeonItem.js";
+
+import {
+  DungeonMaterial,
+} from "../models/DungeonMaterial.js";
+
+import {
   CommunityLogRecord,
 } from "../models/CommunityLogRecord.js";
 
@@ -112,6 +124,9 @@ export async function connectDatabase():
       MemberDailyActivity.createIndexes(),
       Ticket.createIndexes(),
       DungeonRun.createIndexes(),
+      DungeonProfile.createIndexes(),
+      DungeonItem.createIndexes(),
+      DungeonMaterial.createIndexes(),
       CommunityLogRecord.createIndexes(),
     ]);
 
