@@ -20,7 +20,8 @@
     "test:analytics": "npm run build && node scripts/analytics-smoke-test.mjs",
     "test:dungeon-ui": "npm run build && node scripts/dungeon-ui-smoke-test.mjs",
     "test:presence": "npm run build && node scripts/presence-smoke-test.mjs",
-    "test:dating": "npm run build && node scripts/dating-smoke-test.mjs"
+    "test:dating": "npm run build && node scripts/dating-smoke-test.mjs",
+    "test:matchmaking": "npm run build && node scripts/matchmaking-smoke-test.mjs"
   },
   "engines": {
     "node": ">=22.0.0"

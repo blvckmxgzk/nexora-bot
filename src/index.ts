@@ -65,6 +65,10 @@ import {
   botPresenceRuntime,
 } from "./services/botPresenceRuntime.js";
 
+import {
+  matchmakingRuntime,
+} from "./services/matchmakingRuntime.js";
+
 const client =
   new Client({
     intents: [
@@ -213,6 +217,11 @@ async function bootstrap():
       client,
     );
 
+  matchmakingRuntime
+    .start(
+      client,
+    );
+
   const apiServer =
     await createApiServer();
 
@@ -266,6 +275,9 @@ async function bootstrap():
       /*
        * Stop event-producing runtimes first.
        */
+      matchmakingRuntime
+        .stop();
+
       botPresenceRuntime
         .stop();
 

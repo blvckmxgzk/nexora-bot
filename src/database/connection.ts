@@ -96,6 +96,18 @@ import {
   DatingMatch,
 } from "../models/DatingMatch.js";
 
+import {
+  MatchmakingProfile,
+} from "../models/MatchmakingProfile.js";
+
+import {
+  MatchmakingQueue,
+} from "../models/MatchmakingQueue.js";
+
+import {
+  MatchmakingSession,
+} from "../models/MatchmakingSession.js";
+
 export async function connectDatabase():
   Promise<void> {
   try {
@@ -138,6 +150,9 @@ export async function connectDatabase():
       CommunityLogRecord.createIndexes(),
       DatingProfile.createIndexes(),
       DatingMatch.createIndexes(),
+      MatchmakingProfile.createIndexes(),
+      MatchmakingQueue.createIndexes(),
+      MatchmakingSession.createIndexes(),
     ]);
 
     console.log(
