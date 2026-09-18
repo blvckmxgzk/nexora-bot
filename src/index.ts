@@ -61,6 +61,10 @@ import {
   analyticsRuntime,
 } from "./services/analyticsRuntime.js";
 
+import {
+  botPresenceRuntime,
+} from "./services/botPresenceRuntime.js";
+
 const client =
   new Client({
     intents: [
@@ -204,6 +208,11 @@ async function bootstrap():
       client,
     );
 
+  botPresenceRuntime
+    .start(
+      client,
+    );
+
   const apiServer =
     await createApiServer();
 
@@ -257,6 +266,9 @@ async function bootstrap():
       /*
        * Stop event-producing runtimes first.
        */
+      botPresenceRuntime
+        .stop();
+
       analyticsRuntime
         .stop();
 

@@ -18,7 +18,8 @@
     "prebuild": "node scripts/clean-dist.mjs",
     "test:giveaway": "npm run build && node scripts/giveaway-smoke-test.mjs",
     "test:analytics": "npm run build && node scripts/analytics-smoke-test.mjs",
-    "test:dungeon-ui": "npm run build && node scripts/dungeon-ui-smoke-test.mjs"
+    "test:dungeon-ui": "npm run build && node scripts/dungeon-ui-smoke-test.mjs",
+    "test:presence": "npm run build && node scripts/presence-smoke-test.mjs"
   },
   "engines": {
     "node": ">=22.0.0"
